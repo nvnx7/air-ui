@@ -16,18 +16,37 @@ export interface Gesture {
 const PRESETS: Omit<Gesture, 'id'>[] = [
   {
     name: 'Open Palm',
-    description: 'an open hand facing the camera with all five fingers spread apart',
+    description:
+      'an open hand held up facing the camera with all five fingers extended and spread apart',
     action: 'play_pause'
   },
   {
     name: 'Fist',
-    description: 'a closed fist with the fingers curled into the palm',
+    description:
+      'a closed fist with all fingers curled tightly into the palm, knuckles facing the camera',
     action: 'mute'
   },
   {
     name: 'Thumbs Up',
-    description: 'a hand making a thumbs up, with the thumb pointing up and other fingers curled',
+    description: 'a closed hand with only the thumb extended and pointing upward',
     action: 'volume_up'
+  },
+  {
+    name: 'Thumbs Down',
+    description: 'a closed hand with only the thumb extended and pointing downward',
+    action: 'volume_down'
+  },
+  {
+    name: 'Peace Sign',
+    description:
+      'a hand with the index and middle fingers extended upward in a V shape and the other fingers curled down',
+    action: 'screenshot'
+  },
+  {
+    name: 'Rock On',
+    description:
+      'a hand with the index finger and the pinky finger extended and the middle and ring fingers curled down',
+    action: 'next_track'
   }
 ]
 
