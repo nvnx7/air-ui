@@ -1,10 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
 
-// Measured via profiler.exportTable() after dropping capture to 240x180:
-// completionStream averages ~400ms (max ~465ms observed). 650ms gives
-// headroom for the capture/save/IPC overhead on top of that.
-const POLL_INTERVAL_MS = 650
-
 function WebcamCapture(): React.JSX.Element {
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -42,7 +37,7 @@ function WebcamCapture(): React.JSX.Element {
       .catch((err) => setModelError(err instanceof Error ? err.message : String(err)))
   }, [])
 
-  const captureAndClassify = (): void => {
+  const captureAndClassify = async (): Promise<void> => {
     const video = videoRef.current
     const canvas = canvasRef.current
     if (!video || !canvas) return
@@ -53,43 +48,47 @@ function WebcamCapture(): React.JSX.Element {
     if (!ctx) return
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
 
-    canvas.toBlob(
-      async (blob) => {
-        if (!blob) return
-        setCapturedUrl((prev) => {
-          if (prev) URL.revokeObjectURL(prev)
-          return URL.createObjectURL(blob)
-        })
-
-        processingRef.current = true
-        setProcessing(true)
-        try {
-          const buffer = await blob.arrayBuffer()
-          const framePath = await window.qvacAPI.saveFrame(buffer)
-          setLastFramePath(framePath)
-
-          const result = await window.qvacAPI.classifyGesture(framePath)
-          setGesture(result.gesture)
-          setRawReply(result.raw)
-        } finally {
-          processingRef.current = false
-          setProcessing(false)
-        }
-      },
-      'image/jpeg',
-      0.9
+    const blob = await new Promise<Blob | null>((resolve) =>
+      canvas.toBlob(resolve, 'image/jpeg', 0.9)
     )
+    if (!blob) return
+
+    setCapturedUrl((prev) => {
+      if (prev) URL.revokeObjectURL(prev)
+      return URL.createObjectURL(blob)
+    })
+
+    processingRef.current = true
+    setProcessing(true)
+    try {
+      const buffer = await blob.arrayBuffer()
+      const framePath = await window.qvacAPI.saveFrame(buffer)
+      setLastFramePath(framePath)
+
+      const result = await window.qvacAPI.classifyGesture(framePath)
+      setGesture(result.gesture)
+      setRawReply(result.raw)
+    } finally {
+      processingRef.current = false
+      setProcessing(false)
+    }
   }
 
   useEffect(() => {
     if (debugMode || !modelReady || error) return
 
-    const intervalId = setInterval(() => {
-      if (processingRef.current) return
-      captureAndClassify()
-    }, POLL_INTERVAL_MS)
+    let cancelled = false
 
-    return () => clearInterval(intervalId)
+    async function loop(): Promise<void> {
+      while (!cancelled) {
+        await captureAndClassify()
+      }
+    }
+    loop()
+
+    return () => {
+      cancelled = true
+    }
   }, [debugMode, modelReady, error])
 
   const statusLabel = !modelReady
