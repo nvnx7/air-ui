@@ -16,6 +16,8 @@ function WebcamCapture(): React.JSX.Element {
   const [modelError, setModelError] = useState<string | null>(null)
   const [processing, setProcessing] = useState(false)
   const [gesture, setGesture] = useState<string | null>(null)
+  const [rawReply, setRawReply] = useState<string | null>(null)
+  const [debugMode, setDebugMode] = useState(false)
 
   useEffect(() => {
     let stream: MediaStream | null = null
@@ -67,7 +69,8 @@ function WebcamCapture(): React.JSX.Element {
           setLastFramePath(framePath)
 
           const result = await window.qvacAPI.classifyGesture(framePath)
-          setGesture(result)
+          setGesture(result.gesture)
+          setRawReply(result.raw)
         } finally {
           processingRef.current = false
           setProcessing(false)
@@ -79,7 +82,7 @@ function WebcamCapture(): React.JSX.Element {
   }
 
   useEffect(() => {
-    if (!modelReady || error) return
+    if (debugMode || !modelReady || error) return
 
     const intervalId = setInterval(() => {
       if (processingRef.current) return
@@ -87,9 +90,15 @@ function WebcamCapture(): React.JSX.Element {
     }, POLL_INTERVAL_MS)
 
     return () => clearInterval(intervalId)
-  }, [modelReady, error])
+  }, [debugMode, modelReady, error])
 
-  const statusLabel = !modelReady ? 'Loading model…' : processing ? 'Classifying…' : 'Scanning…'
+  const statusLabel = !modelReady
+    ? 'Loading model…'
+    : processing
+      ? 'Classifying…'
+      : debugMode
+        ? 'Debug mode — auto-scan paused'
+        : 'Scanning…'
 
   return (
     <div className="h-screen flex flex-col items-center gap-4 bg-zinc-950 text-zinc-100 p-6">
@@ -107,7 +116,30 @@ function WebcamCapture(): React.JSX.Element {
 
       <p className="text-sm text-zinc-500">{statusLabel}</p>
 
+      <label className="flex items-center gap-2 text-sm text-zinc-400">
+        <input
+          type="checkbox"
+          checked={debugMode}
+          onChange={(e) => setDebugMode(e.target.checked)}
+        />
+        Debug mode (manual capture, auto-scan off)
+      </label>
+
+      {debugMode && (
+        <button
+          onClick={captureAndClassify}
+          disabled={!!error || !modelReady || processing}
+          className="rounded-xl bg-indigo-600 px-4 py-3 text-sm font-medium text-white hover:bg-indigo-500 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          Capture & Classify
+        </button>
+      )}
+
       {gesture && <p className="text-3xl font-bold tracking-wide">{gesture}</p>}
+
+      {rawReply && (
+        <p className="max-w-md text-center text-xs text-zinc-500">&ldquo;{rawReply}&rdquo;</p>
+      )}
 
       {capturedUrl && (
         <div className="flex flex-col items-center gap-2">
