@@ -95,15 +95,21 @@ function WebcamCapture(): React.JSX.Element {
     let cancelled = false
     async function loop(): Promise<void> {
       while (!cancelled) {
-        const framePath = await captureFrame()
-        if (framePath) {
-          const r = await window.qvacAPI.recognizeGesture(framePath, dwellRef.current)
+        try {
+          const framePath = await captureFrame()
+          if (framePath) {
+            const r = await window.qvacAPI.recognizeGesture(framePath, dwellRef.current)
+            if (cancelled) break
+            setDetected(r.name)
+            setProgress(r.progress)
+            setThreshold(r.threshold)
+            setArmed(r.armed)
+            if (r.fired && r.name) flashFired(r.name)
+          }
+        } catch {
+          // Transient/shutdown error — keep the loop alive, brief backoff.
           if (cancelled) break
-          setDetected(r.name)
-          setProgress(r.progress)
-          setThreshold(r.threshold)
-          setArmed(r.armed)
-          if (r.fired && r.name) flashFired(r.name)
+          await new Promise((res) => setTimeout(res, 300))
         }
       }
     }

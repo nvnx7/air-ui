@@ -6,6 +6,13 @@ import { logProfilerSample } from './profiler'
 
 const NONE = 'NONE'
 
+// Raised when the SDK worker aborts an in-flight call during app shutdown.
+// Expected on quit/reload (the loop almost always has a call in flight) — benign.
+function isShutdownError(err: unknown): boolean {
+  const e = err as { code?: number; message?: string }
+  return e?.code === 50206 || /shutting down|WORKER_SHUTDOWN/i.test(e?.message ?? '')
+}
+
 const DESCRIBE_PROMPT =
   'This is a webcam image of a person. Describe only the hand gesture or pose in one short phrase ' +
   "(for example: 'thumbs up', 'open palm facing camera', 'peace sign with two fingers', " +
@@ -88,7 +95,15 @@ export async function recognizeGesture(
     }
   })
 
-  const final = await run.final
+  let final: Awaited<typeof run.final>
+  try {
+    final = await run.final
+  } catch (err) {
+    if (isShutdownError(err)) {
+      return { name: null, raw: '', progress: 0, threshold, armed, fired: false }
+    }
+    throw err
+  }
   console.log('recognize-gesture raw reply:', JSON.stringify(final.contentText))
   logProfilerSample()
 
