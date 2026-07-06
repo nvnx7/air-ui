@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 
-// Measured via profiler.exportTable(): classify-gesture's completion() call
-// averages ~1.05s (1.01-1.17s observed). 1300ms gives headroom for the
-// capture/save/IPC overhead on top of that without leaving much dead air.
-const POLL_INTERVAL_MS = 1300
+// Measured via profiler.exportTable() after dropping capture to 240x180:
+// completionStream averages ~400ms (max ~465ms observed). 650ms gives
+// headroom for the capture/save/IPC overhead on top of that.
+const POLL_INTERVAL_MS = 650
 
 function WebcamCapture(): React.JSX.Element {
   const videoRef = useRef<HTMLVideoElement>(null)
@@ -23,7 +23,7 @@ function WebcamCapture(): React.JSX.Element {
     let stream: MediaStream | null = null
 
     navigator.mediaDevices
-      .getUserMedia({ video: { width: 640, height: 480 } })
+      .getUserMedia({ video: { width: 240, height: 180 } })
       .then((s) => {
         stream = s
         if (videoRef.current) videoRef.current.srcObject = s

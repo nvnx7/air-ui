@@ -19,7 +19,18 @@ export async function loadGestureModel(
     modelSrc: QWEN3VL_2B_MULTIMODAL_Q4_K,
     modelConfig: {
       ctx_size: 2048,
-      projectionModelSrc: MMPROJ_QWEN3VL_2B_MULTIMODAL_Q4_K
+      projectionModelSrc: MMPROJ_QWEN3VL_2B_MULTIMODAL_Q4_K,
+      gpu_layers: 99,
+      device: 'gpu',
+      // Default "sequential" tiles the image for encoding; a single modest
+      // webcam frame shouldn't need multi-tile encoding at all, and this is
+      // the main lever available for the prefill/vision-encode cost that
+      // dominates classify-gesture latency (see profiler ttfb ~= total time).
+      image_tile_mode: 'disabled'
+      // Tried cache-type-k/v: q8_0 KV-cache quantization — no measurable
+      // average-latency win and a worse tail (max 608ms vs 465ms), so
+      // reverted. Generation is capped at 16 tokens and prefill dominates,
+      // leaving little for KV-cache quantization to improve.
     },
     onProgress
   })
