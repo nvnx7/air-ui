@@ -1,7 +1,9 @@
 import { ipcMain } from 'electron'
 import { loadGestureModel, unloadGestureModel } from './model'
 import { saveFrame } from './frame'
-import { classifyGesture } from './gesture'
+import { describeGesture, recognizeGesture } from './gesture'
+import { ACTIONS } from './action'
+import { listGestures, addGesture, deleteGesture, type Gesture } from './library'
 
 export function registerIpcHandlers(): void {
   ipcMain.handle('load-model', async () => {
@@ -18,7 +20,16 @@ export function registerIpcHandlers(): void {
     return saveFrame(buffer)
   })
 
-  ipcMain.handle('classify-gesture', async (_event, framePath: string) => {
-    return classifyGesture(framePath)
+  ipcMain.handle('describe-gesture', async (_event, framePath: string) => {
+    return describeGesture(framePath)
   })
+
+  ipcMain.handle('recognize-gesture', async (_event, framePath: string, dwellFrames: number) => {
+    return recognizeGesture(framePath, dwellFrames)
+  })
+
+  ipcMain.handle('list-actions', async () => ACTIONS)
+  ipcMain.handle('list-gestures', async () => listGestures())
+  ipcMain.handle('add-gesture', async (_event, input: Omit<Gesture, 'id'>) => addGesture(input))
+  ipcMain.handle('delete-gesture', async (_event, id: string) => deleteGesture(id))
 }

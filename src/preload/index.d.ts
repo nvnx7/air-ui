@@ -1,18 +1,37 @@
-// import { ElectronAPI } from '@electron-toolkit/preload'
+interface Gesture {
+  id: string
+  name: string
+  description: string
+  action: string
+}
 
-// declare global {
-//   interface Window {
-//     electron: ElectronAPI
-//     api: unknown
-//   }
-// }
+interface ActionInfo {
+  id: string
+  label: string
+}
+
 declare global {
   interface Window {
     qvacAPI: {
       loadModel: () => Promise<string>
       unloadModel: () => Promise<string>
       saveFrame: (buffer: ArrayBuffer) => Promise<string>
-      classifyGesture: (framePath: string) => Promise<{ gesture: string; raw: string }>
+      describeGesture: (framePath: string) => Promise<string>
+      recognizeGesture: (
+        framePath: string,
+        dwellFrames: number
+      ) => Promise<{
+        name: string | null
+        raw: string
+        progress: number
+        threshold: number
+        armed: boolean
+        fired: boolean
+      }>
+      listActions: () => Promise<ActionInfo[]>
+      listGestures: () => Promise<Gesture[]>
+      addGesture: (input: Omit<Gesture, 'id'>) => Promise<Gesture[]>
+      deleteGesture: (id: string) => Promise<Gesture[]>
     }
   }
 }
