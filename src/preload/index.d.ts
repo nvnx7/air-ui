@@ -32,6 +32,9 @@ declare global {
       listGestures: () => Promise<Gesture[]>
       addGesture: (input: Omit<Gesture, 'id'>) => Promise<Gesture[]>
       deleteGesture: (id: string) => Promise<Gesture[]>
+      getScreenSize: () => Promise<{ width: number; height: number }>
+      moveCursor: (x: number, y: number) => void
+      clickMouse: () => void
     }
   }
 }

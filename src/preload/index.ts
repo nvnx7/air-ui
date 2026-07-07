@@ -51,5 +51,9 @@ contextBridge.exposeInMainWorld('qvacAPI', {
   listGestures: (): Promise<Gesture[]> => ipcRenderer.invoke('list-gestures'),
   addGesture: (input: Omit<Gesture, 'id'>): Promise<Gesture[]> =>
     ipcRenderer.invoke('add-gesture', input),
-  deleteGesture: (id: string): Promise<Gesture[]> => ipcRenderer.invoke('delete-gesture', id)
+  deleteGesture: (id: string): Promise<Gesture[]> => ipcRenderer.invoke('delete-gesture', id),
+  getScreenSize: (): Promise<{ width: number; height: number }> =>
+    ipcRenderer.invoke('screen-size'),
+  moveCursor: (x: number, y: number): void => ipcRenderer.send('move-cursor', x, y),
+  clickMouse: (): void => ipcRenderer.send('click-mouse')
 })

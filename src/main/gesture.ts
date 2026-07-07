@@ -23,17 +23,20 @@ export interface RecognizeResult {
   raw: string
   progress: number // how many consecutive frames the current candidate has held
   threshold: number // frames required to fire (dwell)
-  armed: boolean // false after a fire until a neutral (NONE) frame re-arms
+  armed: boolean // false while cooling down after a fire
   fired: boolean // an action fired on this frame
 }
 
-// Dwell/arming state. An action fires only after a gesture is held for
-// `dwellFrames` consecutive frames, and then not again until the hand returns
-// to neutral (a NONE frame re-arms). This makes firing deliberate and forces a
-// relax-to-neutral between commands, killing transient mid-motion misfires.
+// Dwell/cooldown state. An action fires only after a gesture is held for
+// `dwellFrames` consecutive frames, and then not again until a short cooldown
+// elapses. Time-based (not "wait for a NONE frame") because a relaxed-but-
+// still-in-frame hand often still gets force-matched to the nearest known
+// gesture rather than cleanly reading as NONE — requiring a literal NONE to
+// re-arm meant users had to move their hand fully out of the camera.
 let candidate: string | null = null
 let candidateCount = 0
-let armed = true
+let firedAt = 0
+const FIRE_COOLDOWN_MS = 800
 
 /** Teaching: ask the VLM to describe the hand pose it sees, as a short phrase. */
 export async function describeGesture(framePath: string): Promise<string> {
@@ -63,7 +66,7 @@ export async function recognizeGesture(
 
   const gestures = listGestures()
   if (gestures.length === 0) {
-    return { name: null, raw: '', progress: 0, threshold, armed, fired: false }
+    return { name: null, raw: '', progress: 0, threshold, armed: true, fired: false }
   }
 
   // List each gesture as "NAME: description" so the model knows what each label
@@ -100,7 +103,7 @@ export async function recognizeGesture(
     final = await run.final
   } catch (err) {
     if (isShutdownError(err)) {
-      return { name: null, raw: '', progress: 0, threshold, armed, fired: false }
+      return { name: null, raw: '', progress: 0, threshold, armed: true, fired: false }
     }
     throw err
   }
@@ -116,12 +119,12 @@ export async function recognizeGesture(
   }
 
   const name = match === NONE ? null : match
+  const armed = Date.now() - firedAt >= FIRE_COOLDOWN_MS
 
   if (name === null) {
-    // Neutral frame: reset the dwell candidate and re-arm for the next command.
+    // Neutral frame: reset the dwell candidate (cooldown still governs re-fire).
     candidate = null
     candidateCount = 0
-    armed = true
     return { name: null, raw: final.contentText, progress: 0, threshold, armed, fired: false }
   }
 
@@ -133,16 +136,15 @@ export async function recognizeGesture(
     candidateCount = 1
   }
 
-  // Fire exactly once, only when armed and the pose has been held long enough.
-  // Holding past the threshold keeps counting but never re-fires; firing
-  // disarms until a neutral (NONE) frame is seen.
+  // Fire exactly once, only when past cooldown and the pose has been held long
+  // enough. Holding past the threshold keeps counting but never re-fires.
   let fired = false
   if (armed && candidateCount === threshold) {
     const gesture = gestures.find((g) => g.name === name)
     if (gesture) {
       runAction(gesture.action)
       fired = true
-      armed = false
+      firedAt = Date.now()
     }
   }
 
@@ -151,7 +153,7 @@ export async function recognizeGesture(
     raw: final.contentText,
     progress: Math.min(candidateCount, threshold),
     threshold,
-    armed,
+    armed: fired ? false : armed,
     fired
   }
 }

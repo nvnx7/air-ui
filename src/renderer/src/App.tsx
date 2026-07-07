@@ -128,10 +128,51 @@
 
 // export default App
 
+import { useEffect, useState } from 'react'
 import WebcamCapture from './components/WebcamCapture'
+import HeadPointer from './components/HeadPointer'
+
+type Mode = 'gestures' | 'head'
 
 function App(): React.JSX.Element {
-  return <WebcamCapture />
+  const [mode, setMode] = useState<Mode>('head')
+  const [modelReady, setModelReady] = useState(false)
+  const [modelError, setModelError] = useState<string | null>(null)
+
+  // Load the QVAC model once for the whole app — both modes share it.
+  useEffect(() => {
+    window.qvacAPI
+      .loadModel()
+      .then(() => setModelReady(true))
+      .catch((err) => setModelError(err instanceof Error ? err.message : String(err)))
+  }, [])
+
+  return (
+    <div className="min-h-screen bg-zinc-950 text-zinc-100">
+      <header className="flex items-center gap-4 px-6 py-4 border-b border-zinc-800">
+        <h1 className="text-lg font-semibold">QVAC Gazer</h1>
+        <div className="flex gap-1 rounded-lg bg-zinc-900 p-1 text-sm">
+          <button
+            onClick={() => setMode('head')}
+            className={`rounded-md px-3 py-1 ${mode === 'head' ? 'bg-indigo-600 text-white' : 'text-zinc-400'}`}
+          >
+            Head Pointer
+          </button>
+          <button
+            onClick={() => setMode('gestures')}
+            className={`rounded-md px-3 py-1 ${mode === 'gestures' ? 'bg-indigo-600 text-white' : 'text-zinc-400'}`}
+          >
+            Gestures
+          </button>
+        </div>
+      </header>
+      {mode === 'head' ? (
+        <HeadPointer modelReady={modelReady} modelError={modelError} />
+      ) : (
+        <WebcamCapture modelReady={modelReady} modelError={modelError} />
+      )}
+    </div>
+  )
 }
 
 export default App

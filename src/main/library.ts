@@ -24,7 +24,7 @@ const PRESETS: Omit<Gesture, 'id'>[] = [
     name: 'Fist',
     description:
       'a closed fist with all fingers curled tightly into the palm, knuckles facing the camera',
-    action: 'mute'
+    action: 'left_click'
   },
   {
     name: 'Thumbs Up',

@@ -12,15 +12,18 @@ interface ActionInfo {
   label: string
 }
 
-function WebcamCapture(): React.JSX.Element {
+interface Props {
+  modelReady: boolean
+  modelError: string | null
+}
+
+function WebcamCapture({ modelReady, modelError }: Props): React.JSX.Element {
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const dwellRef = useRef(3)
   const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const [error, setError] = useState<string | null>(null)
-  const [modelReady, setModelReady] = useState(false)
-  const [modelError, setModelError] = useState<string | null>(null)
   const [debugMode, setDebugMode] = useState(false)
 
   const [detected, setDetected] = useState<string | null>(null)
@@ -57,10 +60,6 @@ function WebcamCapture(): React.JSX.Element {
   }, [])
 
   useEffect(() => {
-    window.qvacAPI
-      .loadModel()
-      .then(() => setModelReady(true))
-      .catch((err) => setModelError(err instanceof Error ? err.message : String(err)))
     window.qvacAPI.listActions().then(setActions)
     window.qvacAPI.listGestures().then(setGestures)
   }, [])
@@ -208,7 +207,7 @@ function WebcamCapture(): React.JSX.Element {
           </div>
 
           {!armed && !justFired && (
-            <span className="text-xs text-amber-400">relax hand to reset</span>
+            <span className="text-xs text-amber-400">cooling down…</span>
           )}
         </div>
 
