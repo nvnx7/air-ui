@@ -7,7 +7,7 @@ import {
 } from '@mediapipe/tasks-vision'
 import { OneEuroFilter } from '../oneEuro'
 
-type TrackerMode = 'head' | 'finger' | 'gaze'
+type TrackerMode = 'head' | 'finger' | 'gaze' | 'combined'
 
 // MediaPipe FaceLandmarker topology (478 landmarks incl. refined iris points).
 const NOSE_TIP = 1
@@ -20,6 +20,12 @@ const INDEX_FINGERTIP = 8
 
 // Frames must agree twice before a gesture action fires (snappy but debounced).
 const GESTURE_DWELL = 2
+
+// Combined mode: finger contributes a small bounded fine-adjustment on top of
+// head's coarse target, computed as a self-centering relative nudge (like a
+// joystick) rather than a second absolute position.
+const FINE_RADIUS_PX = 120
+const FINGER_REF_DECAY = 0.02
 
 function average(landmarks: NormalizedLandmark[], indices: number[], axis: 'x' | 'y'): number {
   return indices.reduce((sum, i) => sum + landmarks[i][axis], 0) / indices.length
@@ -43,7 +49,8 @@ function gazePoint(face: NormalizedLandmark[]): { x: number; y: number } {
 const MODE_LABEL: Record<TrackerMode, string> = {
   head: 'Head',
   finger: 'Finger',
-  gaze: 'Eyes (experimental)'
+  gaze: 'Eyes (experimental)',
+  combined: 'Head + Finger (precise)'
 }
 
 interface Props {
@@ -60,11 +67,20 @@ function HeadPointer({ modelReady, modelError }: Props): React.JSX.Element {
   const lastTsRef = useRef(0)
   const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  // Coarse-source smoothing (head/gaze/finger-solo, and head's component in combined).
   const fx = useRef(new OneEuroFilter(1.2, 0.01))
   const fy = useRef(new OneEuroFilter(1.2, 0.01))
+  // Fine-source smoothing (finger, combined mode only).
+  const fineFx = useRef(new OneEuroFilter(1.2, 0.01))
+  const fineFy = useRef(new OneEuroFilter(1.2, 0.01))
+  // Self-centering reference the fine offset is measured against.
+  const fingerRefX = useRef(0.5)
+  const fingerRefY = useRef(0.5)
+  const fingerWasVisible = useRef(false)
 
   const enabledRef = useRef(false)
   const sensitivityRef = useRef(4)
+  const fineSensitivityRef = useRef(6)
   const centerRef = useRef({ x: 0.5, y: 0.5 })
   const invertXRef = useRef(true)
   const invertYRef = useRef(false)
@@ -72,10 +88,12 @@ function HeadPointer({ modelReady, modelError }: Props): React.JSX.Element {
   const latestPoint = useRef<{ x: number; y: number } | null>(null)
 
   const [status, setStatus] = useState('Loading tracker…')
-  const [targetSeen, setTargetSeen] = useState(false)
+  const [faceSeen, setFaceSeen] = useState(false)
+  const [handSeen, setHandSeen] = useState(false)
   const [enabled, setEnabled] = useState(false)
   const [trackerMode, setTrackerMode] = useState<TrackerMode>('head')
   const [sensitivity, setSensitivity] = useState(4)
+  const [fineSensitivity, setFineSensitivity] = useState(6)
   const [invertX, setInvertX] = useState(true)
   const [invertY, setInvertY] = useState(false)
   const [screen, setScreen] = useState({ width: 1440, height: 900 })
@@ -86,6 +104,7 @@ function HeadPointer({ modelReady, modelError }: Props): React.JSX.Element {
   const [gestureThreshold, setGestureThreshold] = useState(GESTURE_DWELL)
   const [gestureArmed, setGestureArmed] = useState(true)
   const [lastRaw, setLastRaw] = useState<string | null>(null)
+  const [gesturesPaused, setGesturesPaused] = useState(false)
 
   useEffect(() => {
     enabledRef.current = enabled
@@ -93,6 +112,9 @@ function HeadPointer({ modelReady, modelError }: Props): React.JSX.Element {
   useEffect(() => {
     sensitivityRef.current = sensitivity
   }, [sensitivity])
+  useEffect(() => {
+    fineSensitivityRef.current = fineSensitivity
+  }, [fineSensitivity])
   useEffect(() => {
     invertXRef.current = invertX
   }, [invertX])
@@ -105,12 +127,15 @@ function HeadPointer({ modelReady, modelError }: Props): React.JSX.Element {
     trackerModeRef.current = trackerMode
     fx.current.reset()
     fy.current.reset()
+    fineFx.current.reset()
+    fineFy.current.reset()
+    fingerWasVisible.current = false
     latestPoint.current = null
     centerRef.current = { x: 0.5, y: 0.5 }
   }, [trackerMode])
 
   // Load both landmarkers once; branch per-frame on the selected tracker mode
-  // so switching Head/Finger/Eyes is instant (no model reload).
+  // so switching Head/Finger/Eyes/Combined is instant (no model reload).
   useEffect(() => {
     let cancelled = false
     let stream: MediaStream | null = null
@@ -163,48 +188,119 @@ function HeadPointer({ modelReady, modelError }: Props): React.JSX.Element {
         if (ts <= lastTsRef.current) ts = lastTsRef.current + 1
         lastTsRef.current = ts
 
-        let raw: { x: number; y: number } | null = null
         const mode = trackerModeRef.current
 
-        if (mode === 'finger') {
-          const hl = handLandmarkerRef.current
-          if (hl) {
-            const res = hl.detectForVideo(video, ts)
-            const hand = res.landmarks?.[0]
-            if (hand?.[INDEX_FINGERTIP]) {
-              raw = { x: hand[INDEX_FINGERTIP].x, y: hand[INDEX_FINGERTIP].y }
-            }
-          }
+        if (mode === 'combined') {
+          tickCombined(video, ts)
         } else {
-          const fl = faceLandmarkerRef.current
-          if (fl) {
-            const res = fl.detectForVideo(video, ts)
-            const face = res.faceLandmarks?.[0]
-            if (face) raw = mode === 'gaze' ? gazePoint(face) : { x: face[NOSE_TIP].x, y: face[NOSE_TIP].y }
-          }
-        }
-
-        if (raw) {
-          setTargetSeen(true)
-          const nx = fx.current.filter(raw.x, ts)
-          const ny = fy.current.filter(raw.y, ts)
-          latestPoint.current = { x: nx, y: ny }
-
-          if (enabledRef.current) {
-            const gain = sensitivityRef.current
-            const sx = invertXRef.current ? -1 : 1
-            const sy = invertYRef.current ? -1 : 1
-            const offX = (nx - centerRef.current.x) * sx
-            const offY = (ny - centerRef.current.y) * sy
-            const tx = clamp(screen.width / 2 + offX * gain * screen.width, 0, screen.width - 1)
-            const ty = clamp(screen.height / 2 + offY * gain * screen.height, 0, screen.height - 1)
-            window.qvacAPI.moveCursor(tx, ty)
-          }
-        } else {
-          setTargetSeen(false)
+          tickSingle(video, ts, mode)
         }
       }
       rafRef.current = requestAnimationFrame(tick)
+    }
+
+    function tickSingle(video: HTMLVideoElement, ts: number, mode: TrackerMode): void {
+      let raw: { x: number; y: number } | null = null
+
+      if (mode === 'finger') {
+        const hl = handLandmarkerRef.current
+        if (hl) {
+          const res = hl.detectForVideo(video, ts)
+          const hand = res.landmarks?.[0]
+          if (hand?.[INDEX_FINGERTIP]) raw = { x: hand[INDEX_FINGERTIP].x, y: hand[INDEX_FINGERTIP].y }
+        }
+        setHandSeen(!!raw)
+      } else {
+        const fl = faceLandmarkerRef.current
+        if (fl) {
+          const res = fl.detectForVideo(video, ts)
+          const face = res.faceLandmarks?.[0]
+          if (face) raw = mode === 'gaze' ? gazePoint(face) : { x: face[NOSE_TIP].x, y: face[NOSE_TIP].y }
+        }
+        setFaceSeen(!!raw)
+      }
+
+      if (!raw) return
+      const nx = fx.current.filter(raw.x, ts)
+      const ny = fy.current.filter(raw.y, ts)
+      latestPoint.current = { x: nx, y: ny }
+
+      if (enabledRef.current) {
+        const gain = sensitivityRef.current
+        const sx = invertXRef.current ? -1 : 1
+        const sy = invertYRef.current ? -1 : 1
+        const offX = (nx - centerRef.current.x) * sx
+        const offY = (ny - centerRef.current.y) * sy
+        const tx = clamp(screen.width / 2 + offX * gain * screen.width, 0, screen.width - 1)
+        const ty = clamp(screen.height / 2 + offY * gain * screen.height, 0, screen.height - 1)
+        window.qvacAPI.moveCursor(tx, ty)
+      }
+    }
+
+    function tickCombined(video: HTMLVideoElement, ts: number): void {
+      const fl = faceLandmarkerRef.current
+      let headRaw: { x: number; y: number } | null = null
+      if (fl) {
+        const res = fl.detectForVideo(video, ts)
+        const face = res.faceLandmarks?.[0]
+        if (face) headRaw = { x: face[NOSE_TIP].x, y: face[NOSE_TIP].y }
+      }
+      setFaceSeen(!!headRaw)
+
+      const hl = handLandmarkerRef.current
+      let fingerRaw: { x: number; y: number } | null = null
+      if (hl) {
+        const res = hl.detectForVideo(video, ts)
+        const hand = res.landmarks?.[0]
+        if (hand?.[INDEX_FINGERTIP]) fingerRaw = { x: hand[INDEX_FINGERTIP].x, y: hand[INDEX_FINGERTIP].y }
+      }
+      setHandSeen(!!fingerRaw)
+
+      if (!headRaw) return
+      const nx = fx.current.filter(headRaw.x, ts)
+      const ny = fy.current.filter(headRaw.y, ts)
+      latestPoint.current = { x: nx, y: ny }
+
+      let fineDxPx = 0
+      let fineDyPx = 0
+      if (fingerRaw) {
+        const fnx = fineFx.current.filter(fingerRaw.x, ts)
+        const fny = fineFy.current.filter(fingerRaw.y, ts)
+        if (!fingerWasVisible.current) {
+          // Hand just (re)appeared — snap the reference so it starts at zero
+          // offset instead of jumping based on a stale reference.
+          fingerRefX.current = fnx
+          fingerRefY.current = fny
+        }
+        fingerWasVisible.current = true
+
+        const rawOffX = fnx - fingerRefX.current
+        const rawOffY = fny - fingerRefY.current
+        // Leaky integrator: reference drifts toward the current finger
+        // position, so holding still lets the fine offset self-recenter —
+        // like a joystick nudge, letting you repeat the same nudge direction.
+        fingerRefX.current += rawOffX * FINGER_REF_DECAY
+        fingerRefY.current += rawOffY * FINGER_REF_DECAY
+
+        const fineGain = fineSensitivityRef.current
+        fineDxPx = clamp(rawOffX * fineGain * screen.width, -FINE_RADIUS_PX, FINE_RADIUS_PX)
+        fineDyPx = clamp(rawOffY * fineGain * screen.height, -FINE_RADIUS_PX, FINE_RADIUS_PX)
+      } else {
+        fingerWasVisible.current = false
+      }
+
+      if (enabledRef.current) {
+        const gain = sensitivityRef.current
+        const sx = invertXRef.current ? -1 : 1
+        const sy = invertYRef.current ? -1 : 1
+        const offX = (nx - centerRef.current.x) * sx
+        const offY = (ny - centerRef.current.y) * sy
+        const headTx = clamp(screen.width / 2 + offX * gain * screen.width, 0, screen.width - 1)
+        const headTy = clamp(screen.height / 2 + offY * gain * screen.height, 0, screen.height - 1)
+        const tx = clamp(headTx + fineDxPx, 0, screen.width - 1)
+        const ty = clamp(headTy + fineDyPx, 0, screen.height - 1)
+        window.qvacAPI.moveCursor(tx, ty)
+      }
     }
 
     init()
@@ -244,9 +340,9 @@ function HeadPointer({ modelReady, modelError }: Props): React.JSX.Element {
   }
 
   // QVAC gesture recognition loop — actions (fist → click, etc.) fire in main.
-  // Runs only while pointer control is enabled, so it can't act while released.
+  // Runs only while pointer control is enabled and not paused.
   useEffect(() => {
-    if (!enabled || !modelReady) {
+    if (!enabled || !modelReady || gesturesPaused) {
       setDetected(null)
       return
     }
@@ -275,7 +371,7 @@ function HeadPointer({ modelReady, modelError }: Props): React.JSX.Element {
     return () => {
       cancelled = true
     }
-  }, [enabled, modelReady])
+  }, [enabled, modelReady, gesturesPaused])
 
   const recenter = (): void => {
     const point = latestPoint.current
@@ -285,7 +381,9 @@ function HeadPointer({ modelReady, modelError }: Props): React.JSX.Element {
     setTimeout(() => setCenteredFlash(false), 900)
   }
 
-  const targetLabel = trackerMode === 'finger' ? 'hand' : 'face'
+  const showFace = trackerMode === 'head' || trackerMode === 'gaze' || trackerMode === 'combined'
+  const showHand = trackerMode === 'finger' || trackerMode === 'combined'
+  const recenterDisabled = trackerMode === 'finger' ? !handSeen : !faceSeen
 
   return (
     <div className="flex flex-col gap-6 p-6 md:flex-row items-start">
@@ -298,13 +396,28 @@ function HeadPointer({ modelReady, modelError }: Props): React.JSX.Element {
           className="rounded-xl w-[480px] -scale-x-100"
         />
         <canvas ref={gestureCanvasRef} className="hidden" />
-        <div className="flex items-center gap-2 text-sm text-zinc-500">
-          <span
-            className={`inline-block w-2 h-2 rounded-full ${
-              targetSeen ? 'bg-emerald-400' : 'bg-zinc-600'
-            }`}
-          />
-          {status} · {targetSeen ? `${targetLabel} tracked` : `no ${targetLabel}`}
+        <div className="flex items-center gap-3 text-sm text-zinc-500">
+          <span>{status}</span>
+          {showFace && (
+            <span className="flex items-center gap-1.5">
+              <span
+                className={`inline-block w-2 h-2 rounded-full ${
+                  faceSeen ? 'bg-emerald-400' : 'bg-zinc-600'
+                }`}
+              />
+              face
+            </span>
+          )}
+          {showHand && (
+            <span className="flex items-center gap-1.5">
+              <span
+                className={`inline-block w-2 h-2 rounded-full ${
+                  handSeen ? 'bg-emerald-400' : 'bg-zinc-600'
+                }`}
+              />
+              hand
+            </span>
+          )}
         </div>
         <div className="h-10 flex flex-col items-center justify-center gap-1.5">
           {justFired ? (
@@ -323,11 +436,13 @@ function HeadPointer({ modelReady, modelError }: Props): React.JSX.Element {
                 ))}
               </div>
             </>
+          ) : enabled && gesturesPaused ? (
+            <span className="text-sm text-zinc-600">gestures paused</span>
           ) : enabled ? (
             <span className="text-sm text-zinc-600">no gesture</span>
           ) : null}
         </div>
-        {enabled && !gestureArmed && !justFired && (
+        {enabled && !gesturesPaused && !gestureArmed && !justFired && (
           <span className="text-xs text-amber-400">cooling down…</span>
         )}
         {enabled && lastRaw && (
@@ -342,7 +457,7 @@ function HeadPointer({ modelReady, modelError }: Props): React.JSX.Element {
 
         <div className="flex flex-col gap-1.5">
           <span className="text-xs uppercase tracking-wide text-zinc-600">Tracker</span>
-          <div className="flex gap-1 rounded-lg bg-zinc-900 p-1 text-sm w-fit">
+          <div className="flex gap-1 rounded-lg bg-zinc-900 p-1 text-sm w-fit flex-wrap">
             {(Object.keys(MODE_LABEL) as TrackerMode[]).map((m) => (
               <button
                 key={m}
@@ -361,21 +476,42 @@ function HeadPointer({ modelReady, modelError }: Props): React.JSX.Element {
               jitter. Increase sensitivity carefully and Recenter often.
             </span>
           )}
+          {trackerMode === 'combined' && (
+            <span className="text-xs text-zinc-500">
+              Head aims coarsely; raise your finger to nudge the cursor precisely within a small
+              local area. Drop your hand to go back to head-only.
+            </span>
+          )}
         </div>
 
-        <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
-          <span className={enabled ? 'text-emerald-400 font-medium' : 'text-zinc-300'}>
-            Enable pointer control {enabled ? '(cursor + gestures live — uncheck to stop)' : ''}
-          </span>
-        </label>
+        <div className="flex items-center gap-3">
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
+            <span className={enabled ? 'text-emerald-400 font-medium' : 'text-zinc-300'}>
+              Enable pointer control {enabled ? '(cursor + gestures live — uncheck to stop)' : ''}
+            </span>
+          </label>
+
+          {enabled && (
+            <button
+              onClick={() => setGesturesPaused((p) => !p)}
+              className={`rounded-lg px-3 py-1 text-xs font-medium ${
+                gesturesPaused
+                  ? 'bg-amber-600 text-white hover:bg-amber-500'
+                  : 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700'
+              }`}
+            >
+              {gesturesPaused ? 'Resume gestures' : 'Pause gestures'}
+            </button>
+          )}
+        </div>
 
         {enabled && !modelReady && (
           <p className="text-xs text-amber-400">Gesture model still loading — clicks not active yet.</p>
         )}
 
         <label className="flex items-center gap-3 text-sm text-zinc-400">
-          <span className="w-28">Sensitivity</span>
+          <span className="w-28">{trackerMode === 'combined' ? 'Head (coarse)' : 'Sensitivity'}</span>
           <input
             type="range"
             min={1}
@@ -386,6 +522,21 @@ function HeadPointer({ modelReady, modelError }: Props): React.JSX.Element {
           />
           <span className="w-10 tabular-nums">{sensitivity.toFixed(1)}</span>
         </label>
+
+        {trackerMode === 'combined' && (
+          <label className="flex items-center gap-3 text-sm text-zinc-400">
+            <span className="w-28">Finger (fine)</span>
+            <input
+              type="range"
+              min={1}
+              max={12}
+              step={0.5}
+              value={fineSensitivity}
+              onChange={(e) => setFineSensitivity(parseFloat(e.target.value))}
+            />
+            <span className="w-10 tabular-nums">{fineSensitivity.toFixed(1)}</span>
+          </label>
+        )}
 
         <div className="flex gap-4 text-sm text-zinc-400">
           <label className="flex items-center gap-2">
@@ -400,18 +551,23 @@ function HeadPointer({ modelReady, modelError }: Props): React.JSX.Element {
 
         <button
           onClick={recenter}
-          disabled={!targetSeen}
+          disabled={recenterDisabled}
           className="self-start rounded-xl bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed"
         >
           {centeredFlash ? '✓ Centered' : 'Recenter (look/point ahead, then click)'}
         </button>
 
         <p className="text-xs text-zinc-600 leading-relaxed">
-          Move your {trackerMode === 'finger' ? 'index finger' : trackerMode === 'gaze' ? 'eyes' : 'head'}{' '}
-          to steer the cursor; use your mapped gestures to act (Fist = click by default — edit
-          mappings in the Gestures tab). If direction is reversed, toggle Invert X/Y. Switching
-          tracker resets calibration — Recenter afterward. Uncheck &ldquo;Enable pointer
-          control&rdquo; to instantly release the cursor and stop gestures.
+          {trackerMode === 'combined'
+            ? 'Head aims the cursor to a general area; your finger fine-tunes the exact point within that area — like a coarse-then-fine two-stage pointer.'
+            : `Move your ${
+                trackerMode === 'finger' ? 'index finger' : trackerMode === 'gaze' ? 'eyes' : 'head'
+              } to steer the cursor.`}{' '}
+          Use your mapped gestures to act (Fist = click by default — edit mappings in the Gestures
+          tab). If direction is reversed, toggle Invert X/Y. Switching tracker resets calibration —
+          Recenter afterward. Use &ldquo;Pause gestures&rdquo; to keep moving the cursor without
+          gesture actions firing (e.g. while fine-positioning). Uncheck &ldquo;Enable pointer
+          control&rdquo; to instantly release the cursor and stop everything.
         </p>
       </div>
     </div>
