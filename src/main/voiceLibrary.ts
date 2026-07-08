@@ -1,7 +1,7 @@
-import { app } from 'electron'
-import { join } from 'path'
-import { readFileSync, writeFileSync, existsSync } from 'fs'
 import { randomUUID } from 'crypto'
+import { app } from 'electron'
+import { existsSync, readFileSync, writeFileSync } from 'fs'
+import { join } from 'path'
 import type { ActionId } from './action'
 
 export interface VoiceCommand {

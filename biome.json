@@ -19,6 +19,11 @@
       "!tsconfig.*.json"
     ]
   },
+  "css": {
+    "parser": {
+      "tailwindDirectives": true
+    }
+  },
   "formatter": {
     "enabled": true,
     "indentStyle": "space",
@@ -40,6 +45,10 @@
       "suspicious": {
         "noArrayIndexKey": "off",
         "useIterableCallbackReturn": "off"
+      },
+      "style": {
+        "noNonNullAssertion": "off",
+        "useNodejsImportProtocol": "off"
       }
     }
   },

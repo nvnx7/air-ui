@@ -1,9 +1,9 @@
 import { join } from 'node:path'
 import { electronApp, is, optimizer } from '@electron-toolkit/utils'
 import { app, BrowserWindow } from 'electron'
+import icon from '../../resources/icon.png?asset'
 import { registerIpcHandlers } from './ipc'
 import { initProfiler } from './profiler'
-import icon from '../../resources/icon.png?asset'
 
 app.commandLine.appendSwitch('no-sandbox')
 initProfiler()

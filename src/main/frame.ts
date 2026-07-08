@@ -1,6 +1,6 @@
 import { writeFile } from 'fs/promises'
-import { join } from 'path'
 import { tmpdir } from 'os'
+import { join } from 'path'
 
 /** Writes a captured JPEG buffer to a fixed temp path, overwriting each call. */
 export async function saveFrame(buffer: ArrayBuffer): Promise<string> {

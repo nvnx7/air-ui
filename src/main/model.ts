@@ -1,11 +1,11 @@
 import {
-  QWEN3VL_2B_MULTIMODAL_Q4_K,
-  MMPROJ_QWEN3VL_2B_MULTIMODAL_Q4_K,
-  WHISPER_EN_BASE_Q8_0,
-  VAD_SILERO_5_1_2,
   loadModel,
+  MMPROJ_QWEN3VL_2B_MULTIMODAL_Q4_K,
+  type ModelProgressUpdate,
+  QWEN3VL_2B_MULTIMODAL_Q4_K,
   unloadModel,
-  type ModelProgressUpdate
+  VAD_SILERO_5_1_2,
+  WHISPER_EN_BASE_Q8_0
 } from '@qvac/sdk'
 
 let modelId: string | null = null

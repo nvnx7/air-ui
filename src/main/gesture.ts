@@ -1,7 +1,7 @@
 import { completion } from '@qvac/sdk'
-import { getModelId } from './model'
 import { runAction } from './action'
 import { listGestures } from './library'
+import { getModelId } from './model'
 import { logProfilerSample } from './profiler'
 
 const NONE = 'NONE'

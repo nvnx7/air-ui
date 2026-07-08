@@ -1,5 +1,5 @@
-import robot from 'robotjs'
 import { screen } from 'electron'
+import robot from 'robotjs'
 
 // Electron's logical-point size, NOT robot.getScreenSize() — the latter
 // under-reports on scaled (non-integer backing-scale) displays, which made the

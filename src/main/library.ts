@@ -1,7 +1,7 @@
+import { randomUUID } from 'node:crypto'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { app } from 'electron'
-import { join } from 'path'
-import { readFileSync, writeFileSync, existsSync } from 'fs'
-import { randomUUID } from 'crypto'
 import type { ActionId } from './action'
 
 export interface Gesture {
@@ -82,14 +82,14 @@ export function listGestures(): Gesture[] {
 
 export function addGesture(input: Omit<Gesture, 'id'>): Gesture[] {
   ensureLoaded()
-  gestures!.push({ ...input, id: randomUUID() })
+  gestures?.push({ ...input, id: randomUUID() })
   persist()
   return gestures!
 }
 
 export function deleteGesture(id: string): Gesture[] {
   ensureLoaded()
-  gestures = gestures!.filter((g) => g.id !== id)
+  gestures = gestures?.filter((g) => g.id !== id)
   persist()
   return gestures!
 }

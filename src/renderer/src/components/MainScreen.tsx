@@ -1,16 +1,16 @@
-import { useEffect, useRef, useState } from 'react'
 import {
   FaceLandmarker,
-  HandLandmarker,
   FilesetResolver,
+  HandLandmarker,
   type NormalizedLandmark
 } from '@mediapipe/tasks-vision'
+import { useEffect, useRef, useState } from 'react'
+import { float32ToBytes, floatToWavBuffer, recordFixedDuration, startMicCapture } from '../mic'
 import { OneEuroFilter } from '../oneEuro'
-import { startMicCapture, recordFixedDuration, floatToWavBuffer, float32ToBytes } from '../mic'
 import SettingsPanel, {
-  type TrackerMode,
-  type Gesture,
   type ActionInfo,
+  type Gesture,
+  type TrackerMode,
   type VoiceCommand
 } from './SettingsPanel'
 
@@ -349,7 +349,7 @@ function MainScreen({ modelReady, modelError }: Props): React.JSX.Element {
       const dt = Math.max((ts - prevCoarseTs.current) / 1000, 1 / 240)
       const speed = Math.hypot(dx, dy) / dt
       const multiplier = clamp(
-        ACCEL_BASE + ACCEL_GAIN * Math.pow(speed, ACCEL_EXPONENT),
+        ACCEL_BASE + ACCEL_GAIN * speed ** ACCEL_EXPONENT,
         ACCEL_BASE,
         ACCEL_MAX
       )
@@ -671,7 +671,9 @@ function MainScreen({ modelReady, modelError }: Props): React.JSX.Element {
         <button
           onClick={() => setIsRunning(!isRunning)}
           className={`self-start w-full rounded-xl px-6 py-4 text-lg font-bold text-white shadow-lg transition-colors ${
-            isRunning ? 'bg-red-600 hover:bg-red-500 shadow-red-500/20' : 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-500/20'
+            isRunning
+              ? 'bg-red-600 hover:bg-red-500 shadow-red-500/20'
+              : 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-500/20'
           }`}
         >
           {isRunning ? 'Stop Detection' : 'Start Detection'}
