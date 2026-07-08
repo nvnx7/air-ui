@@ -146,7 +146,7 @@ function App(): React.JSX.Element {
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100">
       <header className="flex items-center gap-4 px-6 py-4 border-b border-zinc-800">
-        <h1 className="text-lg font-semibold">QVAC Gazer</h1>
+        <h1 className="text-lg font-semibold">AirUI</h1>
       </header>
       <MainScreen modelReady={modelReady} modelError={modelError} />
     </div>
