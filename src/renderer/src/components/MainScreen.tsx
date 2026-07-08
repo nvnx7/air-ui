@@ -91,13 +91,13 @@ function MainScreen({ modelReady, modelError }: Props): React.JSX.Element {
   const cursorShadowRef = useRef<{ x: number; y: number } | null>(null)
   const coarseWasVisible = useRef(false)
 
-  const pointerEnabledRef = useRef(false)
-  const sensitivityXRef = useRef(4)
-  const sensitivityYRef = useRef(6)
+  const pointerEnabledRef = useRef(true)
+  const sensitivityXRef = useRef(12)
+  const sensitivityYRef = useRef(18)
   const centerRef = useRef({ x: 0.5, y: 0.5 })
   const invertXRef = useRef(true)
   const invertYRef = useRef(false)
-  const accelerationEnabledRef = useRef(false)
+  const accelerationEnabledRef = useRef(true)
   const trackerModeRef = useRef<TrackerMode>('head')
   const latestPoint = useRef<{ x: number; y: number } | null>(null)
   const dwellRef = useRef(2)
@@ -109,18 +109,18 @@ function MainScreen({ modelReady, modelError }: Props): React.JSX.Element {
   const [status, setStatus] = useState('Loading tracker…')
   const [faceSeen, setFaceSeen] = useState(false)
   const [handSeen, setHandSeen] = useState(false)
-  const [pointerEnabled, setPointerEnabled] = useState(false)
-  const [gesturesEnabled, setGesturesEnabled] = useState(false)
+  const [pointerEnabled, setPointerEnabled] = useState(true)
+  const [gesturesEnabled, setGesturesEnabled] = useState(true)
   const [voiceEnabled, setVoiceEnabled] = useState(false)
   const [trackerMode, setTrackerMode] = useState<TrackerMode>('head')
   // Vertical defaults higher than horizontal — observed that equal gain on
   // both axes needed noticeably more head movement vertically than
   // horizontally to cover the same screen distance.
-  const [sensitivityX, setSensitivityX] = useState(4)
-  const [sensitivityY, setSensitivityY] = useState(6)
+  const [sensitivityX, setSensitivityX] = useState(12)
+  const [sensitivityY, setSensitivityY] = useState(18)
   const [invertX, setInvertX] = useState(true)
   const [invertY, setInvertY] = useState(false)
-  const [accelerationEnabled, setAccelerationEnabled] = useState(false)
+  const [accelerationEnabled, setAccelerationEnabled] = useState(true)
   const [centeredFlash, setCenteredFlash] = useState(false)
   const [detected, setDetected] = useState<string | null>(null)
   const [justFired, setJustFired] = useState<string | null>(null)
@@ -130,6 +130,7 @@ function MainScreen({ modelReady, modelError }: Props): React.JSX.Element {
   const [lastRaw, setLastRaw] = useState<string | null>(null)
   const [dwellFrames, setDwellFrames] = useState(2)
   const [showSettings, setShowSettings] = useState(false)
+  const [isRunning, setIsRunning] = useState(false)
 
   const [gestures, setGestures] = useState<Gesture[]>([])
   const [actions, setActions] = useState<ActionInfo[]>([])
@@ -157,8 +158,8 @@ function MainScreen({ modelReady, modelError }: Props): React.JSX.Element {
   const [teachVoiceError, setTeachVoiceError] = useState<string | null>(null)
 
   useEffect(() => {
-    pointerEnabledRef.current = pointerEnabled
-  }, [pointerEnabled])
+    pointerEnabledRef.current = isRunning && pointerEnabled
+  }, [pointerEnabled, isRunning])
   useEffect(() => {
     sensitivityXRef.current = sensitivityX
   }, [sensitivityX])
@@ -210,7 +211,7 @@ function MainScreen({ modelReady, modelError }: Props): React.JSX.Element {
   // toggle. Mic capture happens here (renderer owns getUserMedia); the
   // streaming transcription session and phrase matching happen in main.
   useEffect(() => {
-    if (!voiceEnabled) {
+    if (!isRunning || !voiceEnabled) {
       setVoiceStatus('idle')
       setVoiceSpeaking(false)
       setVoiceSampleRate(null)
@@ -246,7 +247,7 @@ function MainScreen({ modelReady, modelError }: Props): React.JSX.Element {
       stopCapture?.()
       window.qvacAPI.stopVoiceSession()
     }
-  }, [voiceEnabled])
+  }, [voiceEnabled, isRunning])
 
   // Load both landmarkers once; branch per-frame on the selected tracker mode
   // so switching Head/Finger/Eyes is instant (no model reload).
@@ -447,7 +448,7 @@ function MainScreen({ modelReady, modelError }: Props): React.JSX.Element {
   // QVAC gesture recognition loop — independent of pointer tracking, gated
   // only by its own "Enable Gestures" toggle.
   useEffect(() => {
-    if (!gesturesEnabled || !modelReady) {
+    if (!isRunning || !gesturesEnabled || !modelReady) {
       setDetected(null)
       return
     }
@@ -476,7 +477,7 @@ function MainScreen({ modelReady, modelError }: Props): React.JSX.Element {
     return () => {
       cancelled = true
     }
-  }, [gesturesEnabled, modelReady])
+  }, [gesturesEnabled, modelReady, isRunning])
 
   // Voice session events push from main (a single "start" call yields events
   // over time, unlike the request/response gesture recognition loop) — VAD
@@ -666,6 +667,15 @@ function MainScreen({ modelReady, modelError }: Props): React.JSX.Element {
 
       <div className="flex flex-col gap-4 w-full max-w-[420px]">
         {modelError && <p className="text-red-400 text-sm">Model error: {modelError}</p>}
+
+        <button
+          onClick={() => setIsRunning(!isRunning)}
+          className={`self-start w-full rounded-xl px-6 py-4 text-lg font-bold text-white shadow-lg transition-colors ${
+            isRunning ? 'bg-red-600 hover:bg-red-500 shadow-red-500/20' : 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-500/20'
+          }`}
+        >
+          {isRunning ? 'Stop Detection' : 'Start Detection'}
+        </button>
 
         <label className="flex items-center gap-2 text-sm">
           <input
