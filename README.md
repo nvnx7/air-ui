@@ -46,8 +46,10 @@ Everything above is QVAC. The single non-QVAC dependency is [`@mediapipe/tasks-v
 
 ### Requirements
 
-- macOS, Windows, or Linux with a webcam and a microphone.
+- macOS, Windows, or Linux with a webcam and a microphone. Linux needs X11 (robotjs, used for cursor/key control, doesn't support Wayland).
 - Camera and microphone permissions granted to the app (pointer tracking needs the camera; voice commands need the mic — both prompted on first use).
+- **macOS only:** grant Accessibility permission (System Settings → Privacy & Security → Accessibility) to the app, or to your terminal/IDE in dev mode. Without it, robotjs silently fails to move the cursor or send key taps.
+- A C/C++ build toolchain and Python 3, needed if `robotjs` has no prebuilt binary for your platform/arch and falls back to compiling from source (Xcode Command Line Tools on macOS, `build-essential` on Linux, Visual Studio Build Tools on Windows).
 - An internet connection the first time each feature is used, to download its model (auto-downloaded and cached after that — fully offline afterward).
 
 ### Install
