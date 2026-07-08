@@ -17,13 +17,13 @@ export interface ActionInfo {
 
 /** The catalog of actions a gesture can be mapped to (single source of truth). */
 export const ACTIONS: ActionInfo[] = [
+  { id: 'left_click', label: 'Left Click' },
   { id: 'play_pause', label: 'Play / Pause' },
   { id: 'next_track', label: 'Next Track' },
   { id: 'prev_track', label: 'Previous Track' },
   { id: 'volume_up', label: 'Volume Up' },
   { id: 'volume_down', label: 'Volume Down' },
   { id: 'mute', label: 'Mute' },
-  { id: 'left_click', label: 'Left Click' },
   { id: 'screenshot', label: 'Screenshot' }
 ]
 

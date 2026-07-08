@@ -1,7 +1,12 @@
 import robot from 'robotjs'
+import { screen } from 'electron'
 
+// Electron's logical-point size, NOT robot.getScreenSize() — the latter
+// under-reports on scaled (non-integer backing-scale) displays, which made the
+// head-pointer clamp the cursor short of the true right/bottom screen edge.
 export function getScreenSize(): { width: number; height: number } {
-  return robot.getScreenSize()
+  const { width, height } = screen.getPrimaryDisplay().size
+  return { width, height }
 }
 
 export function moveCursor(x: number, y: number): void {
