@@ -1,4 +1,10 @@
 @import "tailwindcss";
+
+@theme {
+  --font-michroma: "Michroma", sans-serif;
+  --font-sans: "Montserrat", sans-serif;
+  --color-brand: #0053EF;
+}
 /* @import './base.css';
 
 body {
