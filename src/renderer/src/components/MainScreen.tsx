@@ -21,12 +21,6 @@ const LEFT_EYE = { outer: 263, inner: 362, upper: 386, lower: 374 }
 // MediaPipe HandLandmarker topology (21 landmarks).
 const INDEX_FINGERTIP = 8
 
-// Combined mode: finger contributes a small bounded fine-adjustment on top of
-// head's coarse target, computed as a self-centering relative nudge (like a
-// joystick) rather than a second absolute position.
-const FINE_RADIUS_PX = 120
-const FINGER_REF_DECAY = 0.02
-
 // Acceleration curve (velocity-based mode): multiplier grows nonlinearly with
 // head speed. ACCEL_BASE keeps slow motion from going fully inert (a head
 // tracker has no physical "clutch" the way a lifted mouse does — a soft base
@@ -77,16 +71,9 @@ function MainScreen({ modelReady, modelError }: Props): React.JSX.Element {
   const lastTsRef = useRef(0)
   const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // Coarse-source smoothing (head/gaze/finger-solo, and head's component in combined).
+  // Coarse-source smoothing (head/gaze/finger).
   const fx = useRef(new OneEuroFilter(1.2, 0.01))
   const fy = useRef(new OneEuroFilter(1.2, 0.01))
-  // Fine-source smoothing (finger, combined mode only).
-  const fineFx = useRef(new OneEuroFilter(1.2, 0.01))
-  const fineFy = useRef(new OneEuroFilter(1.2, 0.01))
-  // Self-centering reference the fine offset is measured against.
-  const fingerRefX = useRef(0.5)
-  const fingerRefY = useRef(0.5)
-  const fingerWasVisible = useRef(false)
 
   // Acceleration (velocity-based) mode state — only meaningful while
   // accelerationEnabledRef is true. cursorShadowRef is our own running
@@ -103,7 +90,6 @@ function MainScreen({ modelReady, modelError }: Props): React.JSX.Element {
   const pointerEnabledRef = useRef(false)
   const sensitivityXRef = useRef(4)
   const sensitivityYRef = useRef(6)
-  const fineSensitivityRef = useRef(6)
   const centerRef = useRef({ x: 0.5, y: 0.5 })
   const invertXRef = useRef(true)
   const invertYRef = useRef(false)
@@ -127,7 +113,6 @@ function MainScreen({ modelReady, modelError }: Props): React.JSX.Element {
   // horizontally to cover the same screen distance.
   const [sensitivityX, setSensitivityX] = useState(4)
   const [sensitivityY, setSensitivityY] = useState(6)
-  const [fineSensitivity, setFineSensitivity] = useState(6)
   const [invertX, setInvertX] = useState(true)
   const [invertY, setInvertY] = useState(false)
   const [accelerationEnabled, setAccelerationEnabled] = useState(false)
@@ -161,9 +146,6 @@ function MainScreen({ modelReady, modelError }: Props): React.JSX.Element {
     sensitivityYRef.current = sensitivityY
   }, [sensitivityY])
   useEffect(() => {
-    fineSensitivityRef.current = fineSensitivity
-  }, [fineSensitivity])
-  useEffect(() => {
     invertXRef.current = invertX
   }, [invertX])
   useEffect(() => {
@@ -186,9 +168,6 @@ function MainScreen({ modelReady, modelError }: Props): React.JSX.Element {
     trackerModeRef.current = trackerMode
     fx.current.reset()
     fy.current.reset()
-    fineFx.current.reset()
-    fineFy.current.reset()
-    fingerWasVisible.current = false
     coarseWasVisible.current = false
     prevCoarseNorm.current = null
     cursorShadowRef.current = null
@@ -205,7 +184,7 @@ function MainScreen({ modelReady, modelError }: Props): React.JSX.Element {
   }, [])
 
   // Load both landmarkers once; branch per-frame on the selected tracker mode
-  // so switching Head/Finger/Eyes/Combined is instant (no model reload).
+  // so switching Head/Finger/Eyes is instant (no model reload).
   useEffect(() => {
     let cancelled = false
     let stream: MediaStream | null = null
@@ -258,13 +237,7 @@ function MainScreen({ modelReady, modelError }: Props): React.JSX.Element {
         if (ts <= lastTsRef.current) ts = lastTsRef.current + 1
         lastTsRef.current = ts
 
-        const mode = trackerModeRef.current
-
-        if (mode === 'combined') {
-          tickCombined(video, ts)
-        } else {
-          tickSingle(video, ts, mode)
-        }
+        tickSingle(video, ts, trackerModeRef.current)
       }
       rafRef.current = requestAnimationFrame(tick)
     }
@@ -366,77 +339,6 @@ function MainScreen({ modelReady, modelError }: Props): React.JSX.Element {
           ? acceleratedTarget(nx, ny, ts)
           : absoluteTarget(nx, ny)
         window.qvacAPI.moveCursor(target.x, target.y)
-      }
-    }
-
-    function tickCombined(video: HTMLVideoElement, ts: number): void {
-      const fl = faceLandmarkerRef.current
-      let headRaw: { x: number; y: number } | null = null
-      if (fl) {
-        const res = fl.detectForVideo(video, ts)
-        const face = res.faceLandmarks?.[0]
-        if (face) headRaw = { x: face[NOSE_TIP].x, y: face[NOSE_TIP].y }
-      }
-      setFaceSeen(!!headRaw)
-
-      const hl = handLandmarkerRef.current
-      let fingerRaw: { x: number; y: number } | null = null
-      if (hl) {
-        const res = hl.detectForVideo(video, ts)
-        const hand = res.landmarks?.[0]
-        if (hand?.[INDEX_FINGERTIP]) fingerRaw = { x: hand[INDEX_FINGERTIP].x, y: hand[INDEX_FINGERTIP].y }
-      }
-      setHandSeen(!!fingerRaw)
-
-      if (!headRaw) {
-        coarseWasVisible.current = false
-        return
-      }
-      const nx = fx.current.filter(headRaw.x, ts)
-      const ny = fy.current.filter(headRaw.y, ts)
-      latestPoint.current = { x: nx, y: ny }
-
-      if (!coarseWasVisible.current) {
-        prevCoarseNorm.current = null
-      }
-      coarseWasVisible.current = true
-
-      let fineDxPx = 0
-      let fineDyPx = 0
-      if (fingerRaw) {
-        const fnx = fineFx.current.filter(fingerRaw.x, ts)
-        const fny = fineFy.current.filter(fingerRaw.y, ts)
-        if (!fingerWasVisible.current) {
-          // Hand just (re)appeared — snap the reference so it starts at zero
-          // offset instead of jumping based on a stale reference.
-          fingerRefX.current = fnx
-          fingerRefY.current = fny
-        }
-        fingerWasVisible.current = true
-
-        const rawOffX = fnx - fingerRefX.current
-        const rawOffY = fny - fingerRefY.current
-        // Leaky integrator: reference drifts toward the current finger
-        // position, so holding still lets the fine offset self-recenter —
-        // like a joystick nudge, letting you repeat the same nudge direction.
-        fingerRefX.current += rawOffX * FINGER_REF_DECAY
-        fingerRefY.current += rawOffY * FINGER_REF_DECAY
-
-        const fineGain = fineSensitivityRef.current
-        fineDxPx = clamp(rawOffX * fineGain * screenRef.current.width, -FINE_RADIUS_PX, FINE_RADIUS_PX)
-        fineDyPx = clamp(rawOffY * fineGain * screenRef.current.height, -FINE_RADIUS_PX, FINE_RADIUS_PX)
-      } else {
-        fingerWasVisible.current = false
-      }
-
-      if (pointerEnabledRef.current) {
-        const { width, height } = screenRef.current
-        const head = accelerationEnabledRef.current
-          ? acceleratedTarget(nx, ny, ts)
-          : absoluteTarget(nx, ny)
-        const tx = clamp(head.x + fineDxPx, 0, width - 1)
-        const ty = clamp(head.y + fineDyPx, 0, height - 1)
-        window.qvacAPI.moveCursor(tx, ty)
       }
     }
 
@@ -548,8 +450,8 @@ function MainScreen({ modelReady, modelError }: Props): React.JSX.Element {
     setGestures(await window.qvacAPI.deleteGesture(id))
   }
 
-  const showFace = trackerMode === 'head' || trackerMode === 'gaze' || trackerMode === 'combined'
-  const showHand = trackerMode === 'finger' || trackerMode === 'combined'
+  const showFace = trackerMode === 'head' || trackerMode === 'gaze'
+  const showHand = trackerMode === 'finger'
   const recenterDisabled = trackerMode === 'finger' ? !handSeen : !faceSeen
 
   return (
@@ -658,11 +560,11 @@ function MainScreen({ modelReady, modelError }: Props): React.JSX.Element {
         </label>
 
         <label className="flex items-center gap-3 text-sm text-zinc-400">
-          <span className="w-28">{trackerMode === 'combined' ? 'Head H' : 'Horizontal'}</span>
+          <span className="w-28">Horizontal</span>
           <input
             type="range"
             min={1}
-            max={12}
+            max={20}
             step={0.5}
             value={sensitivityX}
             onChange={(e) => setSensitivityX(parseFloat(e.target.value))}
@@ -671,32 +573,17 @@ function MainScreen({ modelReady, modelError }: Props): React.JSX.Element {
         </label>
 
         <label className="flex items-center gap-3 text-sm text-zinc-400">
-          <span className="w-28">{trackerMode === 'combined' ? 'Head V' : 'Vertical'}</span>
+          <span className="w-28">Vertical</span>
           <input
             type="range"
             min={1}
-            max={12}
+            max={20}
             step={0.5}
             value={sensitivityY}
             onChange={(e) => setSensitivityY(parseFloat(e.target.value))}
           />
           <span className="w-10 tabular-nums">{sensitivityY.toFixed(1)}</span>
         </label>
-
-        {trackerMode === 'combined' && (
-          <label className="flex items-center gap-3 text-sm text-zinc-400">
-            <span className="w-28">Finger (fine)</span>
-            <input
-              type="range"
-              min={1}
-              max={12}
-              step={0.5}
-              value={fineSensitivity}
-              onChange={(e) => setFineSensitivity(parseFloat(e.target.value))}
-            />
-            <span className="w-10 tabular-nums">{fineSensitivity.toFixed(1)}</span>
-          </label>
-        )}
 
         <label className="flex items-center gap-2 text-sm text-zinc-400">
           <input
@@ -716,8 +603,8 @@ function MainScreen({ modelReady, modelError }: Props): React.JSX.Element {
 
         <p className="text-xs text-zinc-600 leading-relaxed">
           Move your {trackerMode === 'finger' ? 'index finger' : trackerMode === 'gaze' ? 'eyes' : 'head'}{' '}
-          to steer the cursor (Combined mode uses both — see Settings). Use taught gestures to act.
-          Open Settings for tracker mode, calibration, and the gesture library.
+          to steer the cursor. Use taught gestures to act. Open Settings for tracker mode,
+          calibration, and the gesture library.
         </p>
       </div>
 
@@ -730,8 +617,6 @@ function MainScreen({ modelReady, modelError }: Props): React.JSX.Element {
           onSensitivityXChange={setSensitivityX}
           sensitivityY={sensitivityY}
           onSensitivityYChange={setSensitivityY}
-          fineSensitivity={fineSensitivity}
-          onFineSensitivityChange={setFineSensitivity}
           invertX={invertX}
           onInvertXChange={setInvertX}
           invertY={invertY}

@@ -1,4 +1,4 @@
-export type TrackerMode = 'head' | 'finger' | 'gaze' | 'combined'
+export type TrackerMode = 'head' | 'finger' | 'gaze'
 
 export interface Gesture {
   id: string
@@ -15,8 +15,7 @@ export interface ActionInfo {
 const MODE_LABEL: Record<TrackerMode, string> = {
   head: 'Head',
   finger: 'Finger',
-  gaze: 'Eyes (experimental)',
-  combined: 'Head + Finger (precise)'
+  gaze: 'Eyes (experimental)'
 }
 
 interface Props {
@@ -29,8 +28,6 @@ interface Props {
   onSensitivityXChange: (n: number) => void
   sensitivityY: number
   onSensitivityYChange: (n: number) => void
-  fineSensitivity: number
-  onFineSensitivityChange: (n: number) => void
 
   invertX: boolean
   onInvertXChange: (b: boolean) => void
@@ -104,21 +101,15 @@ function SettingsPanel(props: Props): React.JSX.Element {
               jitter. Increase sensitivity carefully and Recenter often.
             </span>
           )}
-          {props.trackerMode === 'combined' && (
-            <span className="text-xs text-zinc-500">
-              Head aims coarsely; raise your finger to nudge the cursor precisely within a small
-              local area. Drop your hand to go back to head-only.
-            </span>
-          )}
         </div>
 
         {/* Sliders (duplicated from the main screen for full access here too) */}
         <label className="flex items-center gap-3 text-sm text-zinc-400">
-          <span className="w-32">{props.trackerMode === 'combined' ? 'Head H' : 'Horizontal'}</span>
+          <span className="w-32">Horizontal</span>
           <input
             type="range"
             min={1}
-            max={12}
+            max={20}
             step={0.5}
             value={props.sensitivityX}
             onChange={(e) => props.onSensitivityXChange(parseFloat(e.target.value))}
@@ -127,32 +118,17 @@ function SettingsPanel(props: Props): React.JSX.Element {
         </label>
 
         <label className="flex items-center gap-3 text-sm text-zinc-400">
-          <span className="w-32">{props.trackerMode === 'combined' ? 'Head V' : 'Vertical'}</span>
+          <span className="w-32">Vertical</span>
           <input
             type="range"
             min={1}
-            max={12}
+            max={20}
             step={0.5}
             value={props.sensitivityY}
             onChange={(e) => props.onSensitivityYChange(parseFloat(e.target.value))}
           />
           <span className="w-10 tabular-nums">{props.sensitivityY.toFixed(1)}</span>
         </label>
-
-        {props.trackerMode === 'combined' && (
-          <label className="flex items-center gap-3 text-sm text-zinc-400">
-            <span className="w-32">Finger (fine)</span>
-            <input
-              type="range"
-              min={1}
-              max={12}
-              step={0.5}
-              value={props.fineSensitivity}
-              onChange={(e) => props.onFineSensitivityChange(parseFloat(e.target.value))}
-            />
-            <span className="w-10 tabular-nums">{props.fineSensitivity.toFixed(1)}</span>
-          </label>
-        )}
 
         <label className="flex items-center gap-3 text-sm text-zinc-400">
           <span className="w-32">Gesture hold</span>

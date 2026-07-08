@@ -8,7 +8,7 @@ import { getScreenSize, moveCursor, clickMouse } from './cursor'
 
 export function registerIpcHandlers(): void {
   ipcMain.handle('load-model', async () => {
-    await loadGestureModel((progress) => console.log(progress))
+    await loadGestureModel(() => {})
     return 'model loaded'
   })
 
