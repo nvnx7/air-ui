@@ -84,6 +84,10 @@ function MainScreen({ modelReady, modelError }: Props): React.JSX.Element {
   const trackerModeRef = useRef<TrackerMode>('head')
   const latestPoint = useRef<{ x: number; y: number } | null>(null)
   const dwellRef = useRef(2)
+  // Read directly inside the rAF tick loop (defined once in a mount-only
+  // effect) — a React state value there would be captured stale forever, the
+  // same bug class every other per-frame value already avoids via a ref.
+  const screenRef = useRef({ width: 1440, height: 900 })
 
   const [status, setStatus] = useState('Loading tracker…')
   const [faceSeen, setFaceSeen] = useState(false)
@@ -95,7 +99,6 @@ function MainScreen({ modelReady, modelError }: Props): React.JSX.Element {
   const [fineSensitivity, setFineSensitivity] = useState(6)
   const [invertX, setInvertX] = useState(true)
   const [invertY, setInvertY] = useState(false)
-  const [screen, setScreen] = useState({ width: 1440, height: 900 })
   const [centeredFlash, setCenteredFlash] = useState(false)
   const [detected, setDetected] = useState<string | null>(null)
   const [justFired, setJustFired] = useState<string | null>(null)
@@ -163,7 +166,7 @@ function MainScreen({ modelReady, modelError }: Props): React.JSX.Element {
 
     async function init(): Promise<void> {
       try {
-        setScreen(await window.qvacAPI.getScreenSize())
+        screenRef.current = await window.qvacAPI.getScreenSize()
         const fileset = await FilesetResolver.forVisionTasks('/mediapipe/wasm')
 
         const [face, hand] = await Promise.all([
@@ -247,13 +250,14 @@ function MainScreen({ modelReady, modelError }: Props): React.JSX.Element {
       latestPoint.current = { x: nx, y: ny }
 
       if (pointerEnabledRef.current) {
+        const { width, height } = screenRef.current
         const gain = sensitivityRef.current
         const sx = invertXRef.current ? -1 : 1
         const sy = invertYRef.current ? -1 : 1
         const offX = (nx - centerRef.current.x) * sx
         const offY = (ny - centerRef.current.y) * sy
-        const tx = clamp(screen.width / 2 + offX * gain * screen.width, 0, screen.width - 1)
-        const ty = clamp(screen.height / 2 + offY * gain * screen.height, 0, screen.height - 1)
+        const tx = clamp(width / 2 + offX * gain * width, 0, width - 1)
+        const ty = clamp(height / 2 + offY * gain * height, 0, height - 1)
         window.qvacAPI.moveCursor(tx, ty)
       }
     }
@@ -304,22 +308,23 @@ function MainScreen({ modelReady, modelError }: Props): React.JSX.Element {
         fingerRefY.current += rawOffY * FINGER_REF_DECAY
 
         const fineGain = fineSensitivityRef.current
-        fineDxPx = clamp(rawOffX * fineGain * screen.width, -FINE_RADIUS_PX, FINE_RADIUS_PX)
-        fineDyPx = clamp(rawOffY * fineGain * screen.height, -FINE_RADIUS_PX, FINE_RADIUS_PX)
+        fineDxPx = clamp(rawOffX * fineGain * screenRef.current.width, -FINE_RADIUS_PX, FINE_RADIUS_PX)
+        fineDyPx = clamp(rawOffY * fineGain * screenRef.current.height, -FINE_RADIUS_PX, FINE_RADIUS_PX)
       } else {
         fingerWasVisible.current = false
       }
 
       if (pointerEnabledRef.current) {
+        const { width, height } = screenRef.current
         const gain = sensitivityRef.current
         const sx = invertXRef.current ? -1 : 1
         const sy = invertYRef.current ? -1 : 1
         const offX = (nx - centerRef.current.x) * sx
         const offY = (ny - centerRef.current.y) * sy
-        const headTx = clamp(screen.width / 2 + offX * gain * screen.width, 0, screen.width - 1)
-        const headTy = clamp(screen.height / 2 + offY * gain * screen.height, 0, screen.height - 1)
-        const tx = clamp(headTx + fineDxPx, 0, screen.width - 1)
-        const ty = clamp(headTy + fineDyPx, 0, screen.height - 1)
+        const headTx = clamp(width / 2 + offX * gain * width, 0, width - 1)
+        const headTy = clamp(height / 2 + offY * gain * height, 0, height - 1)
+        const tx = clamp(headTx + fineDxPx, 0, width - 1)
+        const ty = clamp(headTy + fineDyPx, 0, height - 1)
         window.qvacAPI.moveCursor(tx, ty)
       }
     }
