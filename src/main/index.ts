@@ -3,6 +3,7 @@ import { electronApp, is, optimizer } from '@electron-toolkit/utils'
 import { app, BrowserWindow } from 'electron'
 import { registerIpcHandlers } from './ipc'
 import { initProfiler } from './profiler'
+import icon from '../../resources/icon.png?asset'
 
 app.commandLine.appendSwitch('no-sandbox')
 initProfiler()
@@ -12,6 +13,7 @@ function createWindow(): void {
     width: 900,
     height: 670,
     show: false,
+    ...(process.platform === 'linux' ? { icon } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,

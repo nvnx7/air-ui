@@ -1,6 +1,10 @@
-# AirUI
+<div align="center">
+  <img src="./build/icon.png" alt="AirUI Logo" width="120" />
+  <h1>AirUI</h1>
+  <p><b>Your Local AI For Touchless UI Control</b></p>
+</div>
 
-An Electron application with React and TypeScript
+---
 
 ## Recommended IDE Setup
 
