@@ -82,14 +82,14 @@ export function listGestures(): Gesture[] {
 
 export function addGesture(input: Omit<Gesture, 'id'>): Gesture[] {
   ensureLoaded()
-  gestures?.push({ ...input, id: randomUUID() })
+  gestures!.push({ ...input, id: randomUUID() })
   persist()
   return gestures!
 }
 
 export function deleteGesture(id: string): Gesture[] {
   ensureLoaded()
-  gestures = gestures?.filter((g) => g.id !== id)
+  gestures = gestures!.filter((g) => g.id !== id)
   persist()
   return gestures!
 }

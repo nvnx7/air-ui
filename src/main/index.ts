@@ -17,7 +17,12 @@ function createWindow(): void {
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
-      nodeIntegration: false
+      nodeIntegration: false,
+      // Electron throttles rAF/timers (and the Page Visibility API) once the
+      // window loses focus/is occluded — the whole point of this app is a
+      // pointer/gesture/voice loop that keeps running while some other
+      // window has focus, so that throttling must stay off.
+      backgroundThrottling: false
     }
   })
 
