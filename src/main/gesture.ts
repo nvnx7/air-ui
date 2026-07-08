@@ -14,9 +14,11 @@ function isShutdownError(err: unknown): boolean {
 }
 
 const DESCRIBE_PROMPT =
-  'This is a webcam image of a person. Describe only the hand gesture or pose in one short phrase ' +
-  "(for example: 'thumbs up', 'open palm facing camera', 'peace sign with two fingers', " +
-  "'closed fist', 'pointing finger'). Focus on the shape of the hand. If no hand is visible, reply 'no hand'."
+  'This is a webcam image of a person. Describe only the hand gesture, or if no hand is shown, the ' +
+  'facial expression or eye state, in one short phrase (for example: \'thumbs up\', \'open palm ' +
+  "facing camera', 'peace sign with two fingers', 'closed fist', 'pointing finger', 'both eyes " +
+  "closed', 'eyes shut', 'winking one eye', 'mouth open'). Focus on the specific shape or state, not " +
+  'the person in general.'
 
 export interface RecognizeResult {
   name: string | null
@@ -74,9 +76,10 @@ export async function recognizeGesture(
   // constrain the output to the exact set of names.
   const catalog = gestures.map((g) => `${g.name}: ${g.description}`).join('\n')
   const prompt =
-    'This is a webcam image. Here are known hand gestures:\n' +
+    'This is a webcam image. Here are known gestures/expressions (hand poses, eye or facial ' +
+    'states):\n' +
     catalog +
-    `\n\nReply with the name of the gesture the hand best matches, or ${NONE} if it matches none or no hand is visible.`
+    `\n\nReply with the name of the one that best matches what is currently shown, or ${NONE} if none match clearly.`
 
   const names = gestures.map((g) => g.name)
   const run = completion({

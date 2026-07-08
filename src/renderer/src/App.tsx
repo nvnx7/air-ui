@@ -129,22 +129,13 @@
 // export default App
 
 import { useEffect, useState } from 'react'
-import WebcamCapture from './components/WebcamCapture'
-import HeadPointer from './components/HeadPointer'
-
-type Mode = 'gestures' | 'head'
-
-const TABS: { id: Mode; label: string }[] = [
-  { id: 'head', label: 'Head Pointer' },
-  { id: 'gestures', label: 'Gestures' }
-]
+import MainScreen from './components/MainScreen'
 
 function App(): React.JSX.Element {
-  const [mode, setMode] = useState<Mode>('head')
   const [modelReady, setModelReady] = useState(false)
   const [modelError, setModelError] = useState<string | null>(null)
 
-  // Load the QVAC LLM once for the whole app — Head/Gestures share it.
+  // Load the QVAC LLM once for the whole app.
   useEffect(() => {
     window.qvacAPI
       .loadModel()
@@ -156,22 +147,8 @@ function App(): React.JSX.Element {
     <div className="min-h-screen bg-zinc-950 text-zinc-100">
       <header className="flex items-center gap-4 px-6 py-4 border-b border-zinc-800">
         <h1 className="text-lg font-semibold">QVAC Gazer</h1>
-        <div className="flex gap-1 rounded-lg bg-zinc-900 p-1 text-sm">
-          {TABS.map((t) => (
-            <button
-              key={t.id}
-              onClick={() => setMode(t.id)}
-              className={`rounded-md px-3 py-1 ${
-                mode === t.id ? 'bg-indigo-600 text-white' : 'text-zinc-400'
-              }`}
-            >
-              {t.label}
-            </button>
-          ))}
-        </div>
       </header>
-      {mode === 'head' && <HeadPointer modelReady={modelReady} modelError={modelError} />}
-      {mode === 'gestures' && <WebcamCapture modelReady={modelReady} modelError={modelError} />}
+      <MainScreen modelReady={modelReady} modelError={modelError} />
     </div>
   )
 }
