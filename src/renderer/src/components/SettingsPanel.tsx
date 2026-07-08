@@ -25,8 +25,10 @@ interface Props {
   trackerMode: TrackerMode
   onTrackerModeChange: (m: TrackerMode) => void
 
-  sensitivity: number
-  onSensitivityChange: (n: number) => void
+  sensitivityX: number
+  onSensitivityXChange: (n: number) => void
+  sensitivityY: number
+  onSensitivityYChange: (n: number) => void
   fineSensitivity: number
   onFineSensitivityChange: (n: number) => void
 
@@ -34,6 +36,9 @@ interface Props {
   onInvertXChange: (b: boolean) => void
   invertY: boolean
   onInvertYChange: (b: boolean) => void
+
+  accelerationEnabled: boolean
+  onAccelerationChange: (b: boolean) => void
 
   dwellFrames: number
   onDwellFramesChange: (n: number) => void
@@ -109,16 +114,29 @@ function SettingsPanel(props: Props): React.JSX.Element {
 
         {/* Sliders (duplicated from the main screen for full access here too) */}
         <label className="flex items-center gap-3 text-sm text-zinc-400">
-          <span className="w-32">{props.trackerMode === 'combined' ? 'Head (coarse)' : 'Pointer sensitivity'}</span>
+          <span className="w-32">{props.trackerMode === 'combined' ? 'Head H' : 'Horizontal'}</span>
           <input
             type="range"
             min={1}
-            max={8}
+            max={12}
             step={0.5}
-            value={props.sensitivity}
-            onChange={(e) => props.onSensitivityChange(parseFloat(e.target.value))}
+            value={props.sensitivityX}
+            onChange={(e) => props.onSensitivityXChange(parseFloat(e.target.value))}
           />
-          <span className="w-10 tabular-nums">{props.sensitivity.toFixed(1)}</span>
+          <span className="w-10 tabular-nums">{props.sensitivityX.toFixed(1)}</span>
+        </label>
+
+        <label className="flex items-center gap-3 text-sm text-zinc-400">
+          <span className="w-32">{props.trackerMode === 'combined' ? 'Head V' : 'Vertical'}</span>
+          <input
+            type="range"
+            min={1}
+            max={12}
+            step={0.5}
+            value={props.sensitivityY}
+            onChange={(e) => props.onSensitivityYChange(parseFloat(e.target.value))}
+          />
+          <span className="w-10 tabular-nums">{props.sensitivityY.toFixed(1)}</span>
         </label>
 
         {props.trackerMode === 'combined' && (
@@ -174,6 +192,20 @@ function SettingsPanel(props: Props): React.JSX.Element {
             {props.centeredFlash ? '✓ Centered' : 'Recenter'}
           </button>
         </div>
+
+        <label className="flex items-center gap-2 text-sm text-zinc-400">
+          <input
+            type="checkbox"
+            checked={props.accelerationEnabled}
+            onChange={(e) => props.onAccelerationChange(e.target.checked)}
+          />
+          <span>
+            Enable Acceleration{' '}
+            <span className="text-xs text-zinc-600">
+              (fast head movement travels further, like mouse acceleration)
+            </span>
+          </span>
+        </label>
 
         <hr className="border-zinc-800" />
 

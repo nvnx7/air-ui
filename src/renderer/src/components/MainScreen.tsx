@@ -27,6 +27,19 @@ const INDEX_FINGERTIP = 8
 const FINE_RADIUS_PX = 120
 const FINGER_REF_DECAY = 0.02
 
+// Acceleration curve (velocity-based mode): multiplier grows nonlinearly with
+// head speed. ACCEL_BASE keeps slow motion from going fully inert (a head
+// tracker has no physical "clutch" the way a lifted mouse does — a soft base
+// gain lets returning toward neutral only drag the cursor back a little,
+// self-correcting, instead of a hard snap) — but it must stay close to 1 (the
+// implicit multiplier of the off-mode formula), otherwise ordinary
+// moderate-speed motion ends up *slower* than acceleration-off, requiring
+// more head movement instead of less. Starting values — tune by feel.
+const ACCEL_BASE = 0.8
+const ACCEL_GAIN = 2.2
+const ACCEL_EXPONENT = 1.4
+const ACCEL_MAX = 8
+
 function average(landmarks: NormalizedLandmark[], indices: number[], axis: 'x' | 'y'): number {
   return indices.reduce((sum, i) => sum + landmarks[i][axis], 0) / indices.length
 }
@@ -75,12 +88,26 @@ function MainScreen({ modelReady, modelError }: Props): React.JSX.Element {
   const fingerRefY = useRef(0.5)
   const fingerWasVisible = useRef(false)
 
+  // Acceleration (velocity-based) mode state — only meaningful while
+  // accelerationEnabledRef is true. cursorShadowRef is our own running
+  // estimate of the OS cursor's pixel position, since relative/delta
+  // tracking has no fixed formula to derive position from each frame the
+  // way absolute tracking does. Nulled to force a fresh seed on trackerMode
+  // change, on acceleration toggle, and whenever the coarse source
+  // reappears after being lost.
+  const prevCoarseNorm = useRef<{ x: number; y: number } | null>(null)
+  const prevCoarseTs = useRef(0)
+  const cursorShadowRef = useRef<{ x: number; y: number } | null>(null)
+  const coarseWasVisible = useRef(false)
+
   const pointerEnabledRef = useRef(false)
-  const sensitivityRef = useRef(4)
+  const sensitivityXRef = useRef(4)
+  const sensitivityYRef = useRef(6)
   const fineSensitivityRef = useRef(6)
   const centerRef = useRef({ x: 0.5, y: 0.5 })
   const invertXRef = useRef(true)
   const invertYRef = useRef(false)
+  const accelerationEnabledRef = useRef(false)
   const trackerModeRef = useRef<TrackerMode>('head')
   const latestPoint = useRef<{ x: number; y: number } | null>(null)
   const dwellRef = useRef(2)
@@ -95,10 +122,15 @@ function MainScreen({ modelReady, modelError }: Props): React.JSX.Element {
   const [pointerEnabled, setPointerEnabled] = useState(false)
   const [gesturesEnabled, setGesturesEnabled] = useState(false)
   const [trackerMode, setTrackerMode] = useState<TrackerMode>('head')
-  const [sensitivity, setSensitivity] = useState(4)
+  // Vertical defaults higher than horizontal — observed that equal gain on
+  // both axes needed noticeably more head movement vertically than
+  // horizontally to cover the same screen distance.
+  const [sensitivityX, setSensitivityX] = useState(4)
+  const [sensitivityY, setSensitivityY] = useState(6)
   const [fineSensitivity, setFineSensitivity] = useState(6)
   const [invertX, setInvertX] = useState(true)
   const [invertY, setInvertY] = useState(false)
+  const [accelerationEnabled, setAccelerationEnabled] = useState(false)
   const [centeredFlash, setCenteredFlash] = useState(false)
   const [detected, setDetected] = useState<string | null>(null)
   const [justFired, setJustFired] = useState<string | null>(null)
@@ -123,8 +155,11 @@ function MainScreen({ modelReady, modelError }: Props): React.JSX.Element {
     pointerEnabledRef.current = pointerEnabled
   }, [pointerEnabled])
   useEffect(() => {
-    sensitivityRef.current = sensitivity
-  }, [sensitivity])
+    sensitivityXRef.current = sensitivityX
+  }, [sensitivityX])
+  useEffect(() => {
+    sensitivityYRef.current = sensitivityY
+  }, [sensitivityY])
   useEffect(() => {
     fineSensitivityRef.current = fineSensitivity
   }, [fineSensitivity])
@@ -134,6 +169,14 @@ function MainScreen({ modelReady, modelError }: Props): React.JSX.Element {
   useEffect(() => {
     invertYRef.current = invertY
   }, [invertY])
+  useEffect(() => {
+    // Toggling (either direction) invalidates any in-flight relative-
+    // tracking state — always start the next accelerated frame from a
+    // fresh seed rather than resuming from a stale position/timestamp.
+    accelerationEnabledRef.current = accelerationEnabled
+    prevCoarseNorm.current = null
+    cursorShadowRef.current = null
+  }, [accelerationEnabled])
   useEffect(() => {
     dwellRef.current = dwellFrames
   }, [dwellFrames])
@@ -146,6 +189,9 @@ function MainScreen({ modelReady, modelError }: Props): React.JSX.Element {
     fineFx.current.reset()
     fineFy.current.reset()
     fingerWasVisible.current = false
+    coarseWasVisible.current = false
+    prevCoarseNorm.current = null
+    cursorShadowRef.current = null
     latestPoint.current = null
     centerRef.current = { x: 0.5, y: 0.5 }
   }, [trackerMode])
@@ -223,6 +269,62 @@ function MainScreen({ modelReady, modelError }: Props): React.JSX.Element {
       rafRef.current = requestAnimationFrame(tick)
     }
 
+    // Absolute-formula head/gaze/finger-solo target: cursor = screenCenter +
+    // (pos - calibratedCenter) * sensitivity. Used directly when
+    // acceleration is off, and to seed cursorShadowRef when it's on.
+    function absoluteTarget(nx: number, ny: number): { x: number; y: number } {
+      const { width, height } = screenRef.current
+      const gainX = sensitivityXRef.current
+      const gainY = sensitivityYRef.current
+      const sx = invertXRef.current ? -1 : 1
+      const sy = invertYRef.current ? -1 : 1
+      const offX = (nx - centerRef.current.x) * sx
+      const offY = (ny - centerRef.current.y) * sy
+      return {
+        x: clamp(width / 2 + offX * gainX * width, 0, width - 1),
+        y: clamp(height / 2 + offY * gainY * height, 0, height - 1)
+      }
+    }
+
+    // Relative/velocity-based target: multiplier grows nonlinearly with how
+    // fast the coarse source is moving, so a swift head flick travels much
+    // further than the same distance moved slowly (real mouse-acceleration
+    // behavior). Seeds from the absolute formula on first use so there's no
+    // jump when acceleration is (re)enabled or the source (re)appears.
+    function acceleratedTarget(nx: number, ny: number, ts: number): { x: number; y: number } {
+      if (!prevCoarseNorm.current || !cursorShadowRef.current) {
+        const seeded = absoluteTarget(nx, ny)
+        cursorShadowRef.current = seeded
+        prevCoarseNorm.current = { x: nx, y: ny }
+        prevCoarseTs.current = ts
+        return seeded
+      }
+
+      const { width, height } = screenRef.current
+      const gainX = sensitivityXRef.current
+      const gainY = sensitivityYRef.current
+      const sx = invertXRef.current ? -1 : 1
+      const sy = invertYRef.current ? -1 : 1
+      const dx = (nx - prevCoarseNorm.current.x) * sx
+      const dy = (ny - prevCoarseNorm.current.y) * sy
+      const dt = Math.max((ts - prevCoarseTs.current) / 1000, 1 / 240)
+      const speed = Math.hypot(dx, dy) / dt
+      const multiplier = clamp(
+        ACCEL_BASE + ACCEL_GAIN * Math.pow(speed, ACCEL_EXPONENT),
+        ACCEL_BASE,
+        ACCEL_MAX
+      )
+
+      const target = {
+        x: clamp(cursorShadowRef.current.x + dx * gainX * multiplier * width, 0, width - 1),
+        y: clamp(cursorShadowRef.current.y + dy * gainY * multiplier * height, 0, height - 1)
+      }
+      cursorShadowRef.current = target
+      prevCoarseNorm.current = { x: nx, y: ny }
+      prevCoarseTs.current = ts
+      return target
+    }
+
     function tickSingle(video: HTMLVideoElement, ts: number, mode: TrackerMode): void {
       let raw: { x: number; y: number } | null = null
 
@@ -244,21 +346,26 @@ function MainScreen({ modelReady, modelError }: Props): React.JSX.Element {
         setFaceSeen(!!raw)
       }
 
-      if (!raw) return
+      if (!raw) {
+        coarseWasVisible.current = false
+        return
+      }
       const nx = fx.current.filter(raw.x, ts)
       const ny = fy.current.filter(raw.y, ts)
       latestPoint.current = { x: nx, y: ny }
 
+      if (!coarseWasVisible.current) {
+        // Just (re)appeared — don't compute a delta across the gap since it
+        // was last tracked, force a fresh seed instead.
+        prevCoarseNorm.current = null
+      }
+      coarseWasVisible.current = true
+
       if (pointerEnabledRef.current) {
-        const { width, height } = screenRef.current
-        const gain = sensitivityRef.current
-        const sx = invertXRef.current ? -1 : 1
-        const sy = invertYRef.current ? -1 : 1
-        const offX = (nx - centerRef.current.x) * sx
-        const offY = (ny - centerRef.current.y) * sy
-        const tx = clamp(width / 2 + offX * gain * width, 0, width - 1)
-        const ty = clamp(height / 2 + offY * gain * height, 0, height - 1)
-        window.qvacAPI.moveCursor(tx, ty)
+        const target = accelerationEnabledRef.current
+          ? acceleratedTarget(nx, ny, ts)
+          : absoluteTarget(nx, ny)
+        window.qvacAPI.moveCursor(target.x, target.y)
       }
     }
 
@@ -281,10 +388,18 @@ function MainScreen({ modelReady, modelError }: Props): React.JSX.Element {
       }
       setHandSeen(!!fingerRaw)
 
-      if (!headRaw) return
+      if (!headRaw) {
+        coarseWasVisible.current = false
+        return
+      }
       const nx = fx.current.filter(headRaw.x, ts)
       const ny = fy.current.filter(headRaw.y, ts)
       latestPoint.current = { x: nx, y: ny }
+
+      if (!coarseWasVisible.current) {
+        prevCoarseNorm.current = null
+      }
+      coarseWasVisible.current = true
 
       let fineDxPx = 0
       let fineDyPx = 0
@@ -316,15 +431,11 @@ function MainScreen({ modelReady, modelError }: Props): React.JSX.Element {
 
       if (pointerEnabledRef.current) {
         const { width, height } = screenRef.current
-        const gain = sensitivityRef.current
-        const sx = invertXRef.current ? -1 : 1
-        const sy = invertYRef.current ? -1 : 1
-        const offX = (nx - centerRef.current.x) * sx
-        const offY = (ny - centerRef.current.y) * sy
-        const headTx = clamp(width / 2 + offX * gain * width, 0, width - 1)
-        const headTy = clamp(height / 2 + offY * gain * height, 0, height - 1)
-        const tx = clamp(headTx + fineDxPx, 0, width - 1)
-        const ty = clamp(headTy + fineDyPx, 0, height - 1)
+        const head = accelerationEnabledRef.current
+          ? acceleratedTarget(nx, ny, ts)
+          : absoluteTarget(nx, ny)
+        const tx = clamp(head.x + fineDxPx, 0, width - 1)
+        const ty = clamp(head.y + fineDyPx, 0, height - 1)
         window.qvacAPI.moveCursor(tx, ty)
       }
     }
@@ -547,16 +658,29 @@ function MainScreen({ modelReady, modelError }: Props): React.JSX.Element {
         </label>
 
         <label className="flex items-center gap-3 text-sm text-zinc-400">
-          <span className="w-28">{trackerMode === 'combined' ? 'Head (coarse)' : 'Sensitivity'}</span>
+          <span className="w-28">{trackerMode === 'combined' ? 'Head H' : 'Horizontal'}</span>
           <input
             type="range"
             min={1}
-            max={8}
+            max={12}
             step={0.5}
-            value={sensitivity}
-            onChange={(e) => setSensitivity(parseFloat(e.target.value))}
+            value={sensitivityX}
+            onChange={(e) => setSensitivityX(parseFloat(e.target.value))}
           />
-          <span className="w-10 tabular-nums">{sensitivity.toFixed(1)}</span>
+          <span className="w-10 tabular-nums">{sensitivityX.toFixed(1)}</span>
+        </label>
+
+        <label className="flex items-center gap-3 text-sm text-zinc-400">
+          <span className="w-28">{trackerMode === 'combined' ? 'Head V' : 'Vertical'}</span>
+          <input
+            type="range"
+            min={1}
+            max={12}
+            step={0.5}
+            value={sensitivityY}
+            onChange={(e) => setSensitivityY(parseFloat(e.target.value))}
+          />
+          <span className="w-10 tabular-nums">{sensitivityY.toFixed(1)}</span>
         </label>
 
         {trackerMode === 'combined' && (
@@ -573,6 +697,15 @@ function MainScreen({ modelReady, modelError }: Props): React.JSX.Element {
             <span className="w-10 tabular-nums">{fineSensitivity.toFixed(1)}</span>
           </label>
         )}
+
+        <label className="flex items-center gap-2 text-sm text-zinc-400">
+          <input
+            type="checkbox"
+            checked={accelerationEnabled}
+            onChange={(e) => setAccelerationEnabled(e.target.checked)}
+          />
+          <span>Enable Acceleration</span>
+        </label>
 
         <button
           onClick={() => setShowSettings(true)}
@@ -593,14 +726,18 @@ function MainScreen({ modelReady, modelError }: Props): React.JSX.Element {
           onClose={() => setShowSettings(false)}
           trackerMode={trackerMode}
           onTrackerModeChange={setTrackerMode}
-          sensitivity={sensitivity}
-          onSensitivityChange={setSensitivity}
+          sensitivityX={sensitivityX}
+          onSensitivityXChange={setSensitivityX}
+          sensitivityY={sensitivityY}
+          onSensitivityYChange={setSensitivityY}
           fineSensitivity={fineSensitivity}
           onFineSensitivityChange={setFineSensitivity}
           invertX={invertX}
           onInvertXChange={setInvertX}
           invertY={invertY}
           onInvertYChange={setInvertY}
+          accelerationEnabled={accelerationEnabled}
+          onAccelerationChange={setAccelerationEnabled}
           dwellFrames={dwellFrames}
           onDwellFramesChange={setDwellFrames}
           onRecenter={recenter}
