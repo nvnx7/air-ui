@@ -150,5 +150,8 @@ export function floatToWavBuffer(samples: Float32Array, sampleRate = SAMPLE_RATE
 export function float32ToBytes(samples: Float32Array): ArrayBuffer {
   // Float32Array is always backed by a plain ArrayBuffer in this codebase
   // (never SharedArrayBuffer) — TS's DOM lib just widens .buffer's type.
-  return samples.buffer.slice(samples.byteOffset, samples.byteOffset + samples.byteLength) as ArrayBuffer
+  return samples.buffer.slice(
+    samples.byteOffset,
+    samples.byteOffset + samples.byteLength
+  ) as ArrayBuffer
 }

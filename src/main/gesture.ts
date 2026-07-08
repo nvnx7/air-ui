@@ -15,7 +15,7 @@ export function isShutdownError(err: unknown): boolean {
 
 const DESCRIBE_PROMPT =
   'This is a webcam image of a person. Describe only the hand gesture, or if no hand is shown, the ' +
-  'facial expression or eye state, in one short phrase (for example: \'thumbs up\', \'open palm ' +
+  "facial expression or eye state, in one short phrase (for example: 'thumbs up', 'open palm " +
   "facing camera', 'peace sign with two fingers', 'closed fist', 'pointing finger', 'both eyes " +
   "closed', 'eyes shut', 'winking one eye', 'mouth open'). Focus on the specific shape or state, not " +
   'the person in general.'
@@ -116,7 +116,8 @@ export async function recognizeGesture(
   let match = NONE
   try {
     const parsed = JSON.parse(final.contentText) as { match?: string }
-    if (parsed.match && (names.includes(parsed.match) || parsed.match === NONE)) match = parsed.match
+    if (parsed.match && (names.includes(parsed.match) || parsed.match === NONE))
+      match = parsed.match
   } catch {
     // fall through to NONE
   }

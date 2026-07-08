@@ -84,8 +84,7 @@ interface Props {
 }
 
 function SettingsPanel(props: Props): React.JSX.Element {
-  const actionLabel = (id: string): string =>
-    props.actions.find((a) => a.id === id)?.label ?? id
+  const actionLabel = (id: string): string => props.actions.find((a) => a.id === id)?.label ?? id
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6">
@@ -298,7 +297,9 @@ function SettingsPanel(props: Props): React.JSX.Element {
 
         {/* Teach a voice command */}
         <div className="flex flex-col gap-2">
-          <span className="text-xs uppercase tracking-wide text-zinc-600">Teach a voice command</span>
+          <span className="text-xs uppercase tracking-wide text-zinc-600">
+            Teach a voice command
+          </span>
           {props.voiceEnabled && !props.teachingVoice && (
             <p className="text-xs text-amber-400">
               Turn off &ldquo;Enable Voice Commands&rdquo; on the main screen to teach a new one.

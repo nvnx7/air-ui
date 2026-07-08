@@ -1,8 +1,8 @@
+import { join } from 'node:path'
+import { electronApp, is, optimizer } from '@electron-toolkit/utils'
 import { app, BrowserWindow } from 'electron'
-import { join } from 'path'
-import { electronApp, optimizer, is } from '@electron-toolkit/utils'
-import { initProfiler } from './profiler'
 import { registerIpcHandlers } from './ipc'
+import { initProfiler } from './profiler'
 
 app.commandLine.appendSwitch('no-sandbox')
 initProfiler()
@@ -21,8 +21,8 @@ function createWindow(): void {
 
   win.on('ready-to-show', () => win.show())
 
-  if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
-    win.loadURL(process.env['ELECTRON_RENDERER_URL'])
+  if (is.dev && process.env.ELECTRON_RENDERER_URL) {
+    win.loadURL(process.env.ELECTRON_RENDERER_URL)
   } else {
     win.loadFile(join(__dirname, '../renderer/index.html'))
   }

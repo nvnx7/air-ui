@@ -47,9 +47,11 @@ function gazePoint(face: NormalizedLandmark[]): { x: number; y: number } {
   const lIrisX = average(face, LEFT_IRIS, 'x')
   const lIrisY = average(face, LEFT_IRIS, 'y')
 
-  const rx = (rIrisX - face[RIGHT_EYE.inner].x) / (face[RIGHT_EYE.outer].x - face[RIGHT_EYE.inner].x)
+  const rx =
+    (rIrisX - face[RIGHT_EYE.inner].x) / (face[RIGHT_EYE.outer].x - face[RIGHT_EYE.inner].x)
   const lx = (lIrisX - face[LEFT_EYE.inner].x) / (face[LEFT_EYE.outer].x - face[LEFT_EYE.inner].x)
-  const ry = (rIrisY - face[RIGHT_EYE.upper].y) / (face[RIGHT_EYE.lower].y - face[RIGHT_EYE.upper].y)
+  const ry =
+    (rIrisY - face[RIGHT_EYE.upper].y) / (face[RIGHT_EYE.lower].y - face[RIGHT_EYE.upper].y)
   const ly = (lIrisY - face[LEFT_EYE.upper].y) / (face[LEFT_EYE.lower].y - face[LEFT_EYE.upper].y)
 
   return { x: (rx + lx) / 2, y: (ry + ly) / 2 }
@@ -369,7 +371,8 @@ function MainScreen({ modelReady, modelError }: Props): React.JSX.Element {
         if (hl) {
           const res = hl.detectForVideo(video, ts)
           const hand = res.landmarks?.[0]
-          if (hand?.[INDEX_FINGERTIP]) raw = { x: hand[INDEX_FINGERTIP].x, y: hand[INDEX_FINGERTIP].y }
+          if (hand?.[INDEX_FINGERTIP])
+            raw = { x: hand[INDEX_FINGERTIP].x, y: hand[INDEX_FINGERTIP].y }
         }
         setHandSeen(!!raw)
       } else {
@@ -377,7 +380,8 @@ function MainScreen({ modelReady, modelError }: Props): React.JSX.Element {
         if (fl) {
           const res = fl.detectForVideo(video, ts)
           const face = res.faceLandmarks?.[0]
-          if (face) raw = mode === 'gaze' ? gazePoint(face) : { x: face[NOSE_TIP].x, y: face[NOSE_TIP].y }
+          if (face)
+            raw = mode === 'gaze' ? gazePoint(face) : { x: face[NOSE_TIP].x, y: face[NOSE_TIP].y }
         }
         setFaceSeen(!!raw)
       }
@@ -415,7 +419,6 @@ function MainScreen({ modelReady, modelError }: Props): React.JSX.Element {
       handLandmarkerRef.current = null
       stream?.getTracks().forEach((t) => t.stop())
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // Downscale the current video frame and persist it for QVAC gesture recognition.
@@ -687,7 +690,9 @@ function MainScreen({ modelReady, modelError }: Props): React.JSX.Element {
         </label>
 
         {gesturesEnabled && !modelReady && (
-          <p className="text-xs text-amber-400">Gesture model still loading — actions not active yet.</p>
+          <p className="text-xs text-amber-400">
+            Gesture model still loading — actions not active yet.
+          </p>
         )}
 
         <label className="flex items-center gap-2 text-sm">
@@ -757,9 +762,10 @@ function MainScreen({ modelReady, modelError }: Props): React.JSX.Element {
         </button>
 
         <p className="text-xs text-zinc-600 leading-relaxed">
-          Move your {trackerMode === 'finger' ? 'index finger' : trackerMode === 'gaze' ? 'eyes' : 'head'}{' '}
-          to steer the cursor. Use taught gestures to act. Open Settings for tracker mode,
-          calibration, and the gesture library.
+          Move your{' '}
+          {trackerMode === 'finger' ? 'index finger' : trackerMode === 'gaze' ? 'eyes' : 'head'} to
+          steer the cursor. Use taught gestures to act. Open Settings for tracker mode, calibration,
+          and the gesture library.
         </p>
       </div>
 
