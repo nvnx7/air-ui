@@ -8,7 +8,7 @@ const NONE = 'NONE'
 
 // Raised when the SDK worker aborts an in-flight call during app shutdown.
 // Expected on quit/reload (the loop almost always has a call in flight) — benign.
-function isShutdownError(err: unknown): boolean {
+export function isShutdownError(err: unknown): boolean {
   const e = err as { code?: number; message?: string }
   return e?.code === 50206 || /shutting down|WORKER_SHUTDOWN/i.test(e?.message ?? '')
 }

@@ -30,6 +30,16 @@ interface Gesture {
   action: string
 }
 
+interface VoiceCommand {
+  id: string
+  phrase: string
+  action: string
+}
+
+type VoiceSessionEvent =
+  | { type: 'speaking'; speaking: boolean }
+  | { type: 'heard'; transcript: string; matched: boolean; phrase?: string; action?: string }
+
 contextBridge.exposeInMainWorld('qvacAPI', {
   loadModel: (): Promise<string> => ipcRenderer.invoke('load-model'),
   unloadModel: (): Promise<string> => ipcRenderer.invoke('unload-model'),
@@ -55,5 +65,22 @@ contextBridge.exposeInMainWorld('qvacAPI', {
   getScreenSize: (): Promise<{ width: number; height: number }> =>
     ipcRenderer.invoke('screen-size'),
   moveCursor: (x: number, y: number): void => ipcRenderer.send('move-cursor', x, y),
-  clickMouse: (): void => ipcRenderer.send('click-mouse')
+  clickMouse: (): void => ipcRenderer.send('click-mouse'),
+
+  startVoiceSession: (): Promise<string> => ipcRenderer.invoke('start-voice-session'),
+  stopVoiceSession: (): Promise<string> => ipcRenderer.invoke('stop-voice-session'),
+  sendVoiceChunk: (chunk: ArrayBuffer): void => ipcRenderer.send('voice-audio-chunk', chunk),
+  transcribeVoiceSample: (wavBuffer: ArrayBuffer): Promise<string> =>
+    ipcRenderer.invoke('transcribe-voice-sample', wavBuffer),
+  listVoiceCommands: (): Promise<VoiceCommand[]> => ipcRenderer.invoke('list-voice-commands'),
+  addVoiceCommand: (input: Omit<VoiceCommand, 'id'>): Promise<VoiceCommand[]> =>
+    ipcRenderer.invoke('add-voice-command', input),
+  deleteVoiceCommand: (id: string): Promise<VoiceCommand[]> =>
+    ipcRenderer.invoke('delete-voice-command', id),
+  onVoiceEvent: (callback: (event: VoiceSessionEvent) => void): (() => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, voiceEvent: VoiceSessionEvent): void =>
+      callback(voiceEvent)
+    ipcRenderer.on('voice-event', listener)
+    return () => ipcRenderer.removeListener('voice-event', listener)
+  }
 })

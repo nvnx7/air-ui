@@ -1,15 +1,22 @@
 import {
   QWEN3VL_2B_MULTIMODAL_Q4_K,
   MMPROJ_QWEN3VL_2B_MULTIMODAL_Q4_K,
+  WHISPER_EN_BASE_Q8_0,
+  VAD_SILERO_5_1_2,
   loadModel,
   unloadModel,
   type ModelProgressUpdate
 } from '@qvac/sdk'
 
 let modelId: string | null = null
+let voiceModelId: string | null = null
 
 export function getModelId(): string | null {
   return modelId
+}
+
+export function getVoiceModelId(): string | null {
+  return voiceModelId
 }
 
 export async function loadGestureModel(
@@ -40,4 +47,37 @@ export async function unloadGestureModel(): Promise<void> {
   if (!modelId) throw new Error('Model not loaded.')
   await unloadModel({ modelId })
   modelId = null
+}
+
+// Loaded lazily on first "Enable Voice Commands" rather than eagerly at
+// startup like the gesture model — most sessions won't use voice, and a
+// second local model held in memory/GPU the whole time isn't free.
+export async function loadVoiceModel(): Promise<string> {
+  if (voiceModelId) return voiceModelId
+  voiceModelId = await loadModel({
+    modelSrc: WHISPER_EN_BASE_Q8_0,
+    modelConfig: {
+      language: 'en',
+      // Raw PCM straight off a Web Audio AudioWorklet is Float32 — f32le
+      // matches that byte layout exactly, no conversion needed renderer-side.
+      audio_format: 'f32le',
+      // Required for the streaming "conversation" session (emitVadEvents) to
+      // actually detect speech/silence and emit endOfTurn boundaries.
+      vadModelSrc: VAD_SILERO_5_1_2,
+      // Default min_speech_duration_ms is tuned to reject noise transients
+      // and was silently discarding short one-word commands ("click") before
+      // they ever reached the decoder — VAD fired but the buffer stayed
+      // empty. speech_pad_ms adds a little context on each side so short
+      // words aren't clipped right at the phoneme boundary.
+      vad_params: { min_speech_duration_ms: 80, speech_pad_ms: 300 },
+      contextParams: { use_gpu: true }
+    }
+  })
+  return voiceModelId
+}
+
+export async function unloadVoiceModel(): Promise<void> {
+  if (!voiceModelId) return
+  await unloadModel({ modelId: voiceModelId })
+  voiceModelId = null
 }

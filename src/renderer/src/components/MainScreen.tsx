@@ -6,10 +6,12 @@ import {
   type NormalizedLandmark
 } from '@mediapipe/tasks-vision'
 import { OneEuroFilter } from '../oneEuro'
+import { startMicCapture, recordFixedDuration, floatToWavBuffer, float32ToBytes } from '../mic'
 import SettingsPanel, {
   type TrackerMode,
   type Gesture,
-  type ActionInfo
+  type ActionInfo,
+  type VoiceCommand
 } from './SettingsPanel'
 
 // MediaPipe FaceLandmarker topology (478 landmarks incl. refined iris points).
@@ -107,6 +109,7 @@ function MainScreen({ modelReady, modelError }: Props): React.JSX.Element {
   const [handSeen, setHandSeen] = useState(false)
   const [pointerEnabled, setPointerEnabled] = useState(false)
   const [gesturesEnabled, setGesturesEnabled] = useState(false)
+  const [voiceEnabled, setVoiceEnabled] = useState(false)
   const [trackerMode, setTrackerMode] = useState<TrackerMode>('head')
   // Vertical defaults higher than horizontal — observed that equal gain on
   // both axes needed noticeably more head movement vertically than
@@ -128,13 +131,28 @@ function MainScreen({ modelReady, modelError }: Props): React.JSX.Element {
 
   const [gestures, setGestures] = useState<Gesture[]>([])
   const [actions, setActions] = useState<ActionInfo[]>([])
+  const [voiceCommands, setVoiceCommands] = useState<VoiceCommand[]>([])
+  const [lastVoiceTranscript, setLastVoiceTranscript] = useState<string | null>(null)
+  const [voiceStatus, setVoiceStatus] = useState<'idle' | 'starting' | 'listening' | 'error'>(
+    'idle'
+  )
+  const [voiceError, setVoiceError] = useState<string | null>(null)
+  const [voiceSpeaking, setVoiceSpeaking] = useState(false)
+  const [voiceSampleRate, setVoiceSampleRate] = useState<number | null>(null)
 
-  // Teach form.
+  // Teach form (gesture).
   const [teaching, setTeaching] = useState(false)
   const [teachBusy, setTeachBusy] = useState(false)
   const [teachDescription, setTeachDescription] = useState('')
   const [teachName, setTeachName] = useState('')
   const [teachAction, setTeachAction] = useState('')
+
+  // Teach form (voice command).
+  const [teachingVoice, setTeachingVoice] = useState(false)
+  const [teachVoiceBusy, setTeachVoiceBusy] = useState(false)
+  const [teachVoicePhrase, setTeachVoicePhrase] = useState('')
+  const [teachVoiceAction, setTeachVoiceAction] = useState('')
+  const [teachVoiceError, setTeachVoiceError] = useState<string | null>(null)
 
   useEffect(() => {
     pointerEnabledRef.current = pointerEnabled
@@ -179,9 +197,54 @@ function MainScreen({ modelReady, modelError }: Props): React.JSX.Element {
     window.qvacAPI.listActions().then((list) => {
       setActions(list)
       setTeachAction((prev) => prev || list[0]?.id || '')
+      setTeachVoiceAction((prev) => prev || list[0]?.id || '')
     })
     window.qvacAPI.listGestures().then(setGestures)
+    window.qvacAPI.listVoiceCommands().then(setVoiceCommands)
   }, [])
+
+  // Live voice-command listening — independent of pointer tracking and
+  // gesture recognition, gated only by its own "Enable Voice Commands"
+  // toggle. Mic capture happens here (renderer owns getUserMedia); the
+  // streaming transcription session and phrase matching happen in main.
+  useEffect(() => {
+    if (!voiceEnabled) {
+      setVoiceStatus('idle')
+      setVoiceSpeaking(false)
+      setVoiceSampleRate(null)
+      return
+    }
+    let cancelled = false
+    let stopCapture: (() => void) | null = null
+    setVoiceStatus('starting')
+    setVoiceError(null)
+
+    async function start(): Promise<void> {
+      await window.qvacAPI.startVoiceSession()
+      if (cancelled) {
+        await window.qvacAPI.stopVoiceSession()
+        return
+      }
+      const capture = await startMicCapture((chunk) => {
+        window.qvacAPI.sendVoiceChunk(float32ToBytes(chunk))
+      })
+      stopCapture = capture.stop
+      setVoiceSampleRate(capture.contextSampleRate)
+      if (!cancelled) setVoiceStatus('listening')
+    }
+    start().catch((err) => {
+      if (cancelled) return
+      console.warn('voice session failed to start:', err)
+      setVoiceStatus('error')
+      setVoiceError(err instanceof Error ? err.message : String(err))
+    })
+
+    return () => {
+      cancelled = true
+      stopCapture?.()
+      window.qvacAPI.stopVoiceSession()
+    }
+  }, [voiceEnabled])
 
   // Load both landmarkers once; branch per-frame on the selected tracker mode
   // so switching Head/Finger/Eyes is instant (no model reload).
@@ -412,6 +475,21 @@ function MainScreen({ modelReady, modelError }: Props): React.JSX.Element {
     }
   }, [gesturesEnabled, modelReady])
 
+  // Voice session events push from main (a single "start" call yields events
+  // over time, unlike the request/response gesture recognition loop) — VAD
+  // speaking state for a live "hearing you" indicator, and every finished
+  // utterance (matched or not) so silence vs. mishearing are distinguishable.
+  useEffect(() => {
+    return window.qvacAPI.onVoiceEvent((event) => {
+      if (event.type === 'speaking') {
+        setVoiceSpeaking(event.speaking)
+      } else if (event.type === 'heard') {
+        setLastVoiceTranscript(event.transcript)
+        if (event.matched && event.phrase) flashFired(event.phrase)
+      }
+    })
+  }, [])
+
   const recenter = (): void => {
     const point = latestPoint.current
     if (!point) return
@@ -448,6 +526,42 @@ function MainScreen({ modelReady, modelError }: Props): React.JSX.Element {
 
   const removeGesture = async (id: string): Promise<void> => {
     setGestures(await window.qvacAPI.deleteGesture(id))
+  }
+
+  const startTeachVoice = async (): Promise<void> => {
+    setTeachVoiceBusy(true)
+    setTeachVoiceError(null)
+    try {
+      const { samples, sampleRate } = await recordFixedDuration(3000)
+      const wav = floatToWavBuffer(samples, sampleRate)
+      const phrase = await window.qvacAPI.transcribeVoiceSample(wav)
+      if (!phrase.trim()) {
+        setTeachVoiceError("Didn't catch that — try again, closer to the mic.")
+        return
+      }
+      setTeachVoicePhrase(phrase)
+      setTeachVoiceAction(actions[0]?.id ?? '')
+      setTeachingVoice(true)
+    } catch (err) {
+      console.warn('teach voice sample failed:', err)
+      setTeachVoiceError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setTeachVoiceBusy(false)
+    }
+  }
+
+  const saveTeachVoice = async (): Promise<void> => {
+    if (!teachVoicePhrase.trim() || !teachVoiceAction) return
+    const updated = await window.qvacAPI.addVoiceCommand({
+      phrase: teachVoicePhrase.trim(),
+      action: teachVoiceAction
+    })
+    setVoiceCommands(updated)
+    setTeachingVoice(false)
+  }
+
+  const removeVoiceCommand = async (id: string): Promise<void> => {
+    setVoiceCommands(await window.qvacAPI.deleteVoiceCommand(id))
   }
 
   const showFace = trackerMode === 'head' || trackerMode === 'gaze'
@@ -515,6 +629,36 @@ function MainScreen({ modelReady, modelError }: Props): React.JSX.Element {
         {gesturesEnabled && lastRaw && (
           <p className="max-w-[480px] text-center text-xs text-zinc-600">&ldquo;{lastRaw}&rdquo;</p>
         )}
+        {voiceEnabled && (
+          <div className="flex flex-col items-center gap-1">
+            <span className="flex items-center gap-1.5 text-xs text-zinc-500">
+              {voiceStatus === 'starting' && 'starting mic…'}
+              {voiceStatus === 'error' && (
+                <span className="text-red-400">mic error: {voiceError}</span>
+              )}
+              {voiceStatus === 'listening' && (
+                <>
+                  <span
+                    className={`inline-block w-2 h-2 rounded-full ${
+                      voiceSpeaking ? 'bg-emerald-400 animate-pulse' : 'bg-zinc-600'
+                    }`}
+                  />
+                  {voiceSpeaking ? 'hearing you…' : 'listening…'}
+                  {voiceSampleRate !== null && (
+                    <span className={voiceSampleRate === 16000 ? '' : 'text-amber-400'}>
+                      ({voiceSampleRate}Hz{voiceSampleRate !== 16000 ? ' — expected 16000' : ''})
+                    </span>
+                  )}
+                </>
+              )}
+            </span>
+            {lastVoiceTranscript && (
+              <p className="max-w-[480px] text-center text-xs text-zinc-600">
+                heard: &ldquo;{lastVoiceTranscript}&rdquo;
+              </p>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="flex flex-col gap-4 w-full max-w-[420px]">
@@ -545,6 +689,17 @@ function MainScreen({ modelReady, modelError }: Props): React.JSX.Element {
         {gesturesEnabled && !modelReady && (
           <p className="text-xs text-amber-400">Gesture model still loading — actions not active yet.</p>
         )}
+
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={voiceEnabled}
+            onChange={(e) => setVoiceEnabled(e.target.checked)}
+          />
+          <span className={voiceEnabled ? 'text-emerald-400 font-medium' : 'text-zinc-300'}>
+            Enable Voice Commands
+          </span>
+        </label>
 
         <label className="flex items-center gap-3 text-sm text-zinc-400">
           <span className="w-28">Gesture hold</span>
@@ -643,6 +798,19 @@ function MainScreen({ modelReady, modelError }: Props): React.JSX.Element {
           onStartTeach={startTeach}
           onSaveTeach={saveTeach}
           onCancelTeach={() => setTeaching(false)}
+          voiceEnabled={voiceEnabled}
+          voiceCommands={voiceCommands}
+          onDeleteVoiceCommand={removeVoiceCommand}
+          teachingVoice={teachingVoice}
+          teachVoiceBusy={teachVoiceBusy}
+          teachVoiceError={teachVoiceError}
+          teachVoicePhrase={teachVoicePhrase}
+          onTeachVoicePhraseChange={setTeachVoicePhrase}
+          teachVoiceAction={teachVoiceAction}
+          onTeachVoiceActionChange={setTeachVoiceAction}
+          onStartTeachVoice={startTeachVoice}
+          onSaveTeachVoice={saveTeachVoice}
+          onCancelTeachVoice={() => setTeachingVoice(false)}
         />
       )}
     </div>

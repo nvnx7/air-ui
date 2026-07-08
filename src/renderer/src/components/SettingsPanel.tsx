@@ -12,6 +12,12 @@ export interface ActionInfo {
   label: string
 }
 
+export interface VoiceCommand {
+  id: string
+  phrase: string
+  action: string
+}
+
 const MODE_LABEL: Record<TrackerMode, string> = {
   head: 'Head',
   finger: 'Finger',
@@ -60,6 +66,21 @@ interface Props {
   onStartTeach: () => void
   onSaveTeach: () => void
   onCancelTeach: () => void
+
+  voiceEnabled: boolean
+  voiceCommands: VoiceCommand[]
+  onDeleteVoiceCommand: (id: string) => void
+
+  teachingVoice: boolean
+  teachVoiceBusy: boolean
+  teachVoiceError: string | null
+  teachVoicePhrase: string
+  onTeachVoicePhraseChange: (s: string) => void
+  teachVoiceAction: string
+  onTeachVoiceActionChange: (s: string) => void
+  onStartTeachVoice: () => void
+  onSaveTeachVoice: () => void
+  onCancelTeachVoice: () => void
 }
 
 function SettingsPanel(props: Props): React.JSX.Element {
@@ -264,6 +285,92 @@ function SettingsPanel(props: Props): React.JSX.Element {
               <span className="whitespace-nowrap text-indigo-400">{actionLabel(g.action)}</span>
               <button
                 onClick={() => props.onDeleteGesture(g.id)}
+                className="text-zinc-500 hover:text-red-400"
+                title="Delete"
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+        </div>
+
+        <hr className="border-zinc-800" />
+
+        {/* Teach a voice command */}
+        <div className="flex flex-col gap-2">
+          <span className="text-xs uppercase tracking-wide text-zinc-600">Teach a voice command</span>
+          {props.voiceEnabled && !props.teachingVoice && (
+            <p className="text-xs text-amber-400">
+              Turn off &ldquo;Enable Voice Commands&rdquo; on the main screen to teach a new one.
+            </p>
+          )}
+          {!props.voiceEnabled && !props.teachingVoice && (
+            <button
+              onClick={props.onStartTeachVoice}
+              disabled={props.teachVoiceBusy}
+              className="self-start rounded-xl bg-indigo-600 px-4 py-3 text-sm font-medium text-white transition-colors hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {props.teachVoiceBusy ? 'Listening… (3s)' : 'Teach a phrase (speak, then click)'}
+            </button>
+          )}
+          {props.teachVoiceError && !props.teachVoiceBusy && (
+            <p className="text-xs text-red-400">{props.teachVoiceError}</p>
+          )}
+
+          {props.teachingVoice && (
+            <div className="flex flex-col gap-2 rounded-xl border border-zinc-800 p-4">
+              <span className="text-xs text-zinc-500">Heard:</span>
+              <input
+                className="rounded-lg bg-zinc-800 px-3 py-2 text-sm outline-none"
+                placeholder="Phrase (e.g. take a screenshot)"
+                value={props.teachVoicePhrase}
+                onChange={(e) => props.onTeachVoicePhraseChange(e.target.value)}
+              />
+              <select
+                className="rounded-lg bg-zinc-800 px-3 py-2 text-sm outline-none"
+                value={props.teachVoiceAction}
+                onChange={(e) => props.onTeachVoiceActionChange(e.target.value)}
+              >
+                {props.actions.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.label}
+                  </option>
+                ))}
+              </select>
+              <div className="flex gap-2">
+                <button
+                  onClick={props.onSaveTeachVoice}
+                  disabled={!props.teachVoicePhrase.trim()}
+                  className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium hover:bg-emerald-500 disabled:opacity-40"
+                >
+                  Save
+                </button>
+                <button
+                  onClick={props.onCancelTeachVoice}
+                  className="rounded-lg bg-zinc-700 px-4 py-2 text-sm font-medium hover:bg-zinc-600"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Voice command library */}
+        <div className="flex flex-col gap-2">
+          <span className="text-xs uppercase tracking-wide text-zinc-600">Voice Commands</span>
+          {props.voiceCommands.length === 0 && (
+            <span className="text-sm text-zinc-600">None yet.</span>
+          )}
+          {props.voiceCommands.map((c) => (
+            <div
+              key={c.id}
+              className="flex items-center gap-3 rounded-lg bg-zinc-950 px-3 py-2 text-sm"
+            >
+              <span className="flex-1 truncate text-zinc-300">&ldquo;{c.phrase}&rdquo;</span>
+              <span className="whitespace-nowrap text-indigo-400">{actionLabel(c.action)}</span>
+              <button
+                onClick={() => props.onDeleteVoiceCommand(c.id)}
                 className="text-zinc-500 hover:text-red-400"
                 title="Delete"
               >
